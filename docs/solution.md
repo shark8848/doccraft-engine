@@ -1,57 +1,171 @@
 # DocCraft Engine 方案
 
-> 状态：设计提案，等待用户批准实施。本文描述目标设计，不代表已有业务实现；当前交付仅含文档。
+> 状态：首期纵向闭环已实现（2026-10-24）。本文描述已交付方案与明确边界；标为“后续”的能力不包含在当前镜像中。
 
-## 目标与边界
+## 目标与交付范围
 
-首期以真实 PostgreSQL、Elasticsearch 和私有 S3 存储实现文章/FAQ/操作规程的模板驱动采编、图片、不可变版本、指定版本审核发布及阅读搜索。中文为默认语言。不实现实时协同、模板任意脚本或 Node 后端。功能交付以测试记录和路线图为准，本文同时描述目标架构，不把设计视为已交付能力。
+DocCraft 以项目外部的本地 PostgreSQL、本地 Elasticsearch 和 PyUploadX 服务实现模板驱动的知识采编、发布与检索。首期完成一条可运行闭环：
+
+1. 在可视化设计器中编排模板区块与字段，经服务端编译后发布为不可变版本。
+2. 按模板动态生成文档表单，编辑富文本并上传媒体。
+3. 使用 CAS 与幂等键保存草稿，固定模板版本发布。
+4. Worker 校验媒体并通过 Outbox 生成 Elasticsearch 发布投影。
+5. 从发布投影检索中文内容，按已发布 revision 阅读。
+
+不包含实时协同、Canva 式自由画布、模板脚本/任意外部 HTML、多人审批流和音视频转码。
 
 ## 分层与数据所有权
 
-React/TypeScript/Vite/Ant Design + React Hook Form + TanStack Query；Tiptap JSON 用独立 React 阅读器渲染。FastAPI/Pydantic v2 → Service → Repository/UoW → ES/S3 Adapter。SQLAlchemy 2 类型化 ORM、asyncpg，每请求/任务独立 AsyncSession；仓储不 commit，UoW 只提供 PG 事务。Alembic 显式迁移，不按模板建表。
+| 层 | 当前实现 | 责任 |
+|---|---|---|
+| Web | React 19、TypeScript、Vite、Ant Design | 应用壳、列表/编辑页、可视化模板设计器、动态表单、阅读与检索 |
+| API | FastAPI、Pydantic v2 | 模板与文档协议、CAS、幂等、发布、资产 API、SPA/静态资源托管 |
+| Worker | Python asyncio 轮询进程 | 图片校验、Outbox 发布投影 |
+| PostgreSQL | SQLAlchemy 2 AsyncSession + psycopg 3 | 模板、版本、文档指针、revision 元数据、发布记录、资产、幂等操作、Outbox |
+| Elasticsearch | HTTP adapter | 只追加 draft revision；published 搜索投影；中文 `cjk` analyzer |
+| PyUploadX | `pyuploadx.Client` | 二进制上传、下载、删除与健康检查；DocCraft 不直连 S3/MinIO |
 
-PG 保存 Tenant、KnowledgeBase、Template/TemplateVersion、Document、RevisionRecord、Review、Publication、Asset、UploadSession、AssetReference、Operation、OutboxEvent、Job、AuditLog 的控制元数据。正文 values/AST 只存 ES create-only revision；PG 的任务、审计、幂等记录只存摘要、ID、状态，不记录正文。S3 存隔离上传和不可变正式二进制。
+PostgreSQL 表为 `templates`、`template_versions`、`documents`、`revisions`、`publications`、`assets`、`operations`、`outbox_events`。首期以租户字符串做数据隔离，尚未建立独立 Tenant/KnowledgeBase/ACL 表。
 
-Document 分离 draft_revision_id/draft_generation、published_revision_id/publication_generation、control_version、projection_generation、acl_version。RevisionRecord 只有有效版本元数据和 ES 定位；孤儿 ES 候选不进入业务历史。revision 固定模板版本/hash、编辑协议/渲染版本。
+数据所有权遵循以下约束：
 
-## 模板与内容协议
+- 模板源 JSON 是模板唯一规范源，保存在 `template_versions.source`；YAML 仅导入和导出。
+- 草稿与发布正文只保存在 Elasticsearch revision；PostgreSQL 只保存 revision ID、模板版本、内容 hash 和业务状态。
+- 文档分别维护 `draft_revision_id`、`published_revision_id`、`draft_generation`、`publication_generation` 与 `control_version`，草稿更新不改变已发布指针。
+- 资产元数据保存在 PostgreSQL；对象内容由 PyUploadX 持有。正文只存 `assetId`，不存 URL、base64 或对象存储凭据。
+- 不同系统不声称分布式 ACID。ES 写入成功但 PG 未提交时允许留下可清理的孤儿 revision；任何有效 PG 指针都必须能找到对应正文。
 
-YAML 包含 metadata、document、fields、layout.sections、view.slots、workflow.singleReview、indexing。字段支持 string/text/enum/array/object/number/boolean/date/asset/richtext。服务端生成 draft/submit/publish JSON Schema、UI/View Schema、Index Plan、富文本策略、依赖图及 compilerVersion/templateHash。requiredAt 在相应阶段生效；保存始终检查类型和安全。使用 Draft202012Validator + FormatChecker，禁联网引用。
+## 前端交互基线
 
-单文档、UTF-8 256KB、深度16、字段200；拒绝重复键、alias/anchor/merge、tag、非字符串键、危险字段 ID、未知字段/组件/索引语义。诊断包含 path/line/column。条件只有 eq/ne/in/exists/and/or/not，依赖图拒绝循环。visibleWhen 只影响 UI，隐藏字段 preserve，不授予权限。发布模板不可变，被引用版本不可删除；升级不影响旧文档。迁移必须 dry-run 后产生新 revision，绝不覆盖发布正文。
+前端与当前 `ikc-demo`、`WeKnora` 对齐，细则见 [前端交互与视觉基线](frontend-interaction.md)。实现时采用“`ikc-demo` 壳层与主题骨架 + `WeKnora` 内容密度”：
 
-AST 白名单支持段落、标题、列表、引用、代码、表格、链接及 kbImage/kbVideo/kbAudio/kbAttachment/kbDocumentLink。blockId 为稳定标识，媒体只存 assetId 和受限描述/尺寸，不存 URL/base64。Python 验证属性、节点、深度、大小、URL，独立提取纯文本和安全 HTML；React 用显式组件渲染，不执行 HTML。共享 JSON fixtures 保证双端语义，不假设 Python 可执行 TS。拒绝 iframe、任意 HTML/style、危险协议和未知节点；粘贴经编辑器 schema 净化。
+- 可折叠侧栏、品牌区、分组导航、底部主题与依赖状态；四套 CSS 变量主题。
+- 页头标题/说明/动作、范围切换、筛选与搜索工具条、资源卡片网格、骨架屏、空状态、抽屉和消息反馈。
+- 1440px 三栏编辑器、1024px 紧凑三栏、窄屏纵向堆叠；Playwright 验证 390px 下无横向溢出。
 
-## 保存与恢复
+## 模板协议
 
-请求带 If-Match + Idempotency-Key。先鉴权和校验，短事务 A 登记 Operation（请求摘要、固定 revisionId、预期 generation）和在途资产保护；事务外 create-only 写 ES；短事务 B 重做鉴权、确认 Operation，CAS draft_generation，登记 RevisionRecord、切换指针、固化引用、审计/Outbox、标记 COMMITTED。缺前提428，旧版本412，同键异请求409。摘要包含模板、目标、条件和内容。
+模板由 `metadata`、`fields[]`、`layout`、`workflow`、`indexing` 组成，`schemaVersion=1`。字段与区块使用稳定 ID；支持 `string/text/enum/array/object/number/boolean/date/asset/richtext`，布局支持 `stack/section/columns/field/richText/asset/staticText`。
 
-响应丢失后同键同请求返回原 revision/ETag；ES 超时按固定 ID GET 验证 operationId/contentHash 后继续，不分配新 ID。不能仅因 ES 存在就让版本有效；不能从 PG 摘要恢复未写入正文。并发恢复通过 Operation 锁与 CAS 保证唯一提交。重试必须保留原请求，失败候选延迟清理。
+服务端 `app/compiler.py` 负责：
 
-刷新先 PG 权限/指针，再 ES GET，不用搜索确认保存。自动保存需去抖、串行、内容去重、IME 暂停、离线错误可见；冲突需显式重新载入或另存，不能覆盖。历史保留当前草稿、审核、发布、手动快照；自动快照只能经引用检查清理，禁止正文 TTL。
+- 校验根布局、重复字段/区块 ID、父子关系、嵌套深度、字段引用与字段类型匹配。
+- 生成 `draft/submit/publish` 三阶段 JSON Schema、UI/View 布局索引、索引计划和模板 hash。
+- 根据 `requiredAt` 校验草稿与发布内容；编译器版本固定写入发布模板版本。
 
-## 流程、权限和检索
+示例布局：
 
-审核固定 revision，不能自审；编辑草稿不影响审核候选或发布。发布在同一 PG 事务中验证指定 revision 已批准、发布权限和引用 READY，写 Publication、指针、审计、Outbox。撤回立即受 PG 约束，恢复历史产生新草稿。
+```json
+{
+  "schemaVersion": 1,
+  "fields": [
+    {"id": "summary", "type": "text", "label": "摘要", "requiredAt": ["submit"]}
+  ],
+  "layout": {
+    "id": "root",
+    "kind": "stack",
+    "children": [
+      {
+        "id": "sec_basic",
+        "kind": "section",
+        "title": "基本信息",
+        "children": [
+          {"id": "slot_summary", "kind": "field", "fieldId": "summary"}
+        ]
+      }
+    ]
+  }
+}
+```
 
-认证上下文确定 tenant/user，不接受任意租户 header。角色 reader/editor/reviewer/publisher/template_admin/kb_admin/tenant_admin 按知识库和文档 ACL 授权；关联查询同样带租户。无身份提供方时只允许显式开发身份适配器，生产 fail closed。ES 不对浏览器暴露。
+`workflow.singleReview` 已进入协议模型，但首期发布端点采用“发布者直接发布”，审核状态机属于后续能力。
 
-正文索引真实 _source、dynamic:strict、values/template enabled:false。draft-search 和 published-search 为派生投影，服务器提取 title/summary/fullText；精确字段 flattened，日期/数值固定 typed nested，拒绝无法正确支持的分组语义。首期中文使用内置可部署 cjk analyzer，无外置插件。
+### 可视化编辑
 
-Outbox Worker 每次读取 PG 当前指针，按单调 projection_generation 使用 ES external version 写投影；撤回/删除写高版本 tombstone，不能简单删除丢失版本屏障。搜索候选先 tenant/ACL 限定，后 PG 批量最终鉴权和比对 published_revision_id，剔除陈旧结果并补取。不返回 ES 原始 total、聚合或未授权摘要。首期可限制返回数量，不承诺无限分页；未来 PIT/search_after 游标绑定用户/租户/查询。
+模板设计器由组件面板、结构化画布和属性面板组成：
 
-## 媒体与任务
+- 从组件面板拖入字段、富文本、媒体、分组、分栏、容器或说明区块。
+- 使用浏览器原生 HTML5 拖拽实现插入与同容器排序；禁用把容器拖入自身子树的非法操作。
+- 每个区块提供上移、下移、删除按钮，保证拖拽不是唯一操作路径。
+- 修改布局或字段属性进入撤销/重做栈；切换选中区块时属性面板同步。
+- 预览基于当前草稿渲染；校验与服务端编译使用同一规范源。
+- 草稿保存必须携带 `If-Match`，冲突返回 412 并保留当前内容，避免静默覆盖。
 
-资产状态 INITIATED→UPLOADING→UPLOADED→SCANNING→PROCESSING→READY，异常 FAILED/QUARANTINED；删除 DELETING→DELETED。随机隔离 key，完成时核验真实大小、magic、checksum、配额；扫描后 Pillow 解码、像素限制、清理 EXIF、重新编码，写新的不可变正式 key。SVG 拒绝，旧上传链接不能覆盖正式资源。草稿可展示处理状态；发布仅 READY。
+画布只编辑声明式布局树，不做绝对定位，不执行模板脚本。当前未引入 `dnd-kit` 或 Tiptap，以免为已满足的功能增加运行时依赖。
 
-私有资源通过鉴权代理访问：同租户且对真实引用 revision 有权限；未引用上传仅上传者/明确媒体库权限可访问。代理强撤销；如未来使用短时签名 URL，必须说明失效窗口。删除先 DELETING 禁止新引用，再安全期复查所有保留 revision、审核/发布和在途 Operation，最后删除；不能只检查当前草稿。
+## 文档采编与发布
 
-独立 Python Worker 从 PG 短事务 SKIP LOCKED 领取 Job/Outbox，持久租约、随机 fencing token、超时重领、退避、重试上限与死信；网络/扫描/转码在事务外，更新必须匹配 token。任务只含 ID。扫描开发替身显式配置且生产禁用；生产使用 ClamAV。音视频后续通过隔离 FFmpeg Worker 限制 CPU/内存/时长，原始和派生对象分离。
+创建文档时固定当前已发布的 `template_version_id`。编辑页根据模板布局生成字段控件；富文本以 JSON AST 保存，当前支持段落、二级/三级标题、项目符号/编号列表、引用、链接、粗体、斜体、行内代码、换行和图片。
 
-## 运维、恢复与扩展
+草稿保存协议：
 
-Compose 固定 Web/API/Worker/PG/ES/S3/扫描服务版本，私有数据端口不对外。环境变量无生产默认密钥。统一错误 code/message/traceId/details(path)，OpenAPI 为实际端点，不为未实现能力返回假成功。
+1. 校验 `If-Match` 与 `Idempotency-Key`；请求缺失分别返回 428。
+2. 以幂等键查找 Operation。同键同请求直接返回原 revision 与 ETag；同键异请求返回 409。
+3. 对文档行加锁并比较 `control_version`；旧版本返回 412。
+4. 按草稿阶段校验字段，检查所有正文中的 `assetId` 属于当前租户且状态为 `READY`。
+5. 以 create-only 方式写入 ES revision，再在 PostgreSQL 登记 Revision、推进文档指针并提交。
 
-备份先进入写入维护窗口/记录一致水位，等待在途保存和对象落盘，记录 PG 指针与有效 revision 清单，再保存 PG、对应 ES revision 和 S3 版本/清单及校验和；独立备份不天然一致。恢复到隔离环境，先对象/ES 后 PG，按清单验证每个指针/资产/模板 hash，缺失对象不得开放读取。重建搜索投影并补发幂等任务；完成引用/权限/抽样阅读校验后切流。备份加密、离站、定期演练，明确 RPO/RTO。在线备份需后续实现带跨系统水位的变更日志重放。
+发布协议：
 
-导入将数据先放隔离区，限制压缩比/条目/路径，模板校验和资源扫描后才产生新 revision；导出固定 PG 指针集、模板/AST版本、资源清单及 checksum，HTML 转义，不能导出未授权历史。跨版本迁移提供 dry-run、错误报告、可重试操作记录与回滚新 revision，不能原地改旧内容。
+1. 锁定文档并读取当前草稿 revision。
+2. 按发布阶段重新校验必填项与内容类型。
+3. 再次检查 revision 引用的全部资产，防止保存后资产进入 `QUARANTINED` 或处理中状态。
+4. 在同一 PostgreSQL 事务中写 Publication、推进发布指针与 generation、写 Outbox。
+5. Worker 对 `publish.index` 事件生成搜索投影，使用 external version 防止旧投影覆盖新投影。
+
+发布阅读固定 `published_revision_id`，不会随草稿变化。首期发布不要求再次提交 `If-Match`，而是通过行锁串行化并递增 `control_version`；更完整的发布前置条件可在后续扩展。
+
+## 媒体与 PyUploadX
+
+上传路径：
+
+1. 浏览器把文件提交给 DocCraft API，不接触 PyUploadX API Key。
+2. API 流式写入临时文件，同时检查 MIME、大小并计算 SHA-256。
+3. 服务端生成 `doccraft/{env}/{tenant}/assets/{assetId}/{safeName}`，通过 `pyuploadx.Client` 上传并记录 file ID、bucket、object key、大小和 hash。
+4. 图片初始为 `SCANNING`，其他允许类型初始为 `READY`。
+5. Worker 通过 SDK 下载图片，使用 Pillow 校验格式与像素上限，更新为 `READY` 或 `QUARANTINED`。
+6. 前端读取媒体时走 DocCraft 鉴权代理，API 经 SDK 下载后返回临时响应；不持久化签名 URL。
+
+当前状态机为 `SCANNING -> READY | QUARANTINED`，非图片为 `READY`。删除、引用回收、超时对账、ClamAV、EXIF 清洗和音视频派生对象属于后续运维/安全能力。
+
+## 检索与 Worker
+
+- `doccraft-revisions-v1`：保存不可变 draft revision，`values` 字段不参与索引。
+- `doccraft-published-v1`：保存标题、摘要、全文、模板版本、generation 和内容 hash，`status=published`。
+- 两个索引均使用 `cjk` analyzer、`dynamic: strict` 和外部版本写入。
+- Worker 每轮在 `SKIP LOCKED` 事务中领取待处理资产和 Outbox；失败按次数回到 `PENDING`，超过上限标记 `FAILED`。
+- 搜索先按租户和发布状态过滤，再以 `title^4`、`summary^2`、`fullText` 多字段匹配并返回高亮片段。
+
+## 接口与运行
+
+主要 API：
+
+| 能力 | 端点 |
+|---|---|
+| 健康与就绪 | `GET /healthz`、`GET /readyz` |
+| 会话 | `GET /api/v1/session` |
+| 模板 | `GET/POST /api/v1/templates`、`GET /templates/{id}`、`PUT /templates/{id}/draft`、`POST /templates/{id}/validate`、`POST /templates/{id}/publish` |
+| 模板 YAML | `POST /api/v1/templates/import/yaml`、`GET /api/v1/templates/{id}/export.yaml` |
+| 文档 | `GET/POST /api/v1/documents`、`GET /documents/{id}`、`PUT /documents/{id}/draft`、`POST /documents/{id}/publish`、`GET /documents/{id}/published` |
+| 资产 | `GET/POST /api/v1/assets`、`GET /assets/{id}`、`GET /assets/{id}/content` |
+| 检索 | `GET /api/v1/search?q=...` |
+
+默认 `DOCCRAFT_AUTO_CREATE_SCHEMA=true` 由 ORM 元数据建表；`migrations/001_initial.sql` 提供等价 DDL。`DOCCRAFT_AUTO_INIT_INDICES=true` 创建两个 ES 索引。生产环境应关闭自动建表/建索引，改由显式迁移和索引发布流程接管。
+
+镜像由 `Dockerfile` 构建，入口角色支持 `web/api/worker`。默认 `web` 同时启动 API、Worker 与 HAProxy：仅暴露 `5290` Web 入口和 `8404` 状态页，API 内部监听 `127.0.0.1:8100`。PG/ES/PyUploadX 通过环境变量连接，不进入本仓库 Compose 生命周期。
+
+## 安全边界与后续路线
+
+当前安全与一致性边界：
+
+- 开发模式可从 `X-DocCraft-User/Tenant/Role` 注入身份；生产模式缺少身份时返回 401，但尚未接入 OIDC/JWT。
+- 发布权限只区分发布者角色；细粒度文档/知识库 ACL、审计日志、审核与撤回未实现。
+- SPA fallback 不接管 `api/`、`healthz`、`readyz`、文档和 OpenAPI 路径，避免把 API 404 伪装为 HTML。
+- API 错误统一返回 `code/message/traceId`，持久化与存储异常分别映射为 4xx/5xx，不伪报成功。
+
+后续优先级：
+
+1. 接入生产身份提供方与细粒度 ACL，补审核流、撤回和审计。
+2. 增加资产删除/引用回收、超时对账、病毒扫描与音视频隔离处理。
+3. 增加 revision 历史、冲突重载/另存 UI、自动保存和更多富文本节点。
+4. 增加 PG/ES/PyUploadX 跨系统备份恢复演练与可观测性指标。

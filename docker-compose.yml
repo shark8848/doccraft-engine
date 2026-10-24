@@ -1,0 +1,20 @@
+services:
+  doccraft:
+    image: ${DOCCRAFT_IMAGE:-doccraft-engine:0.1.0}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DOCCRAFT_ENV: ${DOCCRAFT_ENV:-dev}
+      DOCCRAFT_DATABASE_URL: ${DOCCRAFT_DATABASE_URL:-postgresql+psycopg://open-ikc-platform:1qaz2wsx3edc@host.docker.internal:5432/doccraft}
+      DOCCRAFT_ES_URL: ${DOCCRAFT_ES_URL:-https://host.docker.internal:9200}
+      DOCCRAFT_PYUPLOADX_BASE_URL: ${DOCCRAFT_PYUPLOADX_BASE_URL:-http://host.docker.internal:8000}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:5290:5290"
+      - "127.0.0.1:8404:8404"
+    volumes:
+      - doccraft-data:/app/data
+
+volumes:
+  doccraft-data:
