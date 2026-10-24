@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -44,6 +45,11 @@ class FakeStorage:
 
     def close(self) -> None:
         return None
+
+    async def download(self, _file_id: str, destination: str) -> Path:
+        path = Path(destination)
+        path.write_bytes(b"\x89PNG\r\n\x1a\n")
+        return path
 
 
 def test_template_document_cas_idempotency_and_publish() -> None:
@@ -140,7 +146,7 @@ def test_template_document_cas_idempotency_and_publish() -> None:
                         bucket="test",
                         object_key=f"test/{asset_id}.png",
                         pyuploadx_file_id="file_test",
-                        original_name="power.png",
+                        original_name="电源.png",
                         mime_type="image/png",
                         size_bytes=8,
                         sha256="0" * 64,
@@ -158,6 +164,13 @@ def test_template_document_cas_idempotency_and_publish() -> None:
                 await session.commit()
 
         asyncio.run(add_ready_asset())
+        downloaded_asset = client.get(f"/api/v1/assets/{asset_id}/content")
+        assert downloaded_asset.status_code == 200, downloaded_asset.text
+        assert downloaded_asset.content == b"\x89PNG\r\n\x1a\n"
+        disposition = downloaded_asset.headers["Content-Disposition"]
+        assert "filename*=UTF-8''%E7%94%B5%E6%BA%90.png" in disposition
+        assert disposition.isascii()
+
         created_asset_doc = client.post(
             "/api/v1/documents",
             json={"templateId": template_id, "title": "带媒体文档"},

@@ -4,6 +4,7 @@ import {
   App,
   Button,
   Checkbox,
+  Drawer,
   Input,
   Modal,
   Select,
@@ -22,6 +23,7 @@ import {
   ColumnWidthOutlined,
   DeleteOutlined,
   DownloadOutlined,
+  EditOutlined,
   EyeOutlined,
   FileTextOutlined,
   FontSizeOutlined,
@@ -110,6 +112,45 @@ function makePaletteBlock(kind: BlockKind, source: TemplateSource): { block: Lay
   return { block, source: { ...source, fields: [...source.fields, field] } };
 }
 
+function fieldTypePatch(field: TemplateField, type: FieldType): Partial<TemplateField> {
+  if (type !== "enum") return { type, options: [] };
+  if (field.options?.length) return { type };
+  return { type, options: [{ value: "option_1", label: "选项 1" }] };
+}
+
+function FieldDefinitionFields({ field, onChange }: { field: TemplateField; onChange: (patch: Partial<TemplateField>) => void }) {
+  return (
+    <>
+      <label className="form-label">显示名称</label>
+      <Input value={field.label} maxLength={200} onChange={(event) => onChange({ label: event.target.value })} />
+      <div className="form-hint">字段 ID：<code>{field.id}</code>（稳定标识，不可修改）</div>
+      <label className="form-label" style={{ marginTop: 9 }}>字段类型</label>
+      <Select style={{ width: "100%" }} value={field.type} options={FIELD_TYPES} onChange={(value: FieldType) => onChange(fieldTypePatch(field, value))} />
+      <label className="form-label" style={{ marginTop: 9 }}>占位提示</label>
+      <Input value={field.placeholder ?? ""} onChange={(event) => onChange({ placeholder: event.target.value })} />
+      <label className="form-label" style={{ marginTop: 9 }}>帮助说明</label>
+      <Input.TextArea rows={2} value={field.help ?? ""} onChange={(event) => onChange({ help: event.target.value })} />
+      {field.type === "enum" && (
+        <>
+          <label className="form-label" style={{ marginTop: 9 }}>选项（每行“值|显示名”）</label>
+          <Input.TextArea
+            rows={4}
+            value={(field.options ?? []).map((option) => `${option.value}|${option.label}`).join("\n")}
+            onChange={(event) => onChange({
+              options: event.target.value.split("\n").filter(Boolean).map((line) => {
+                const [value, label] = line.split("|");
+                return { value: value.trim(), label: (label ?? value).trim() };
+              }),
+            })}
+          />
+        </>
+      )}
+      <label className="form-label" style={{ marginTop: 9 }}>必填阶段</label>
+      <Checkbox.Group value={field.requiredAt} options={STAGES} onChange={(values) => onChange({ requiredAt: values as Stage[] })} />
+    </>
+  );
+}
+
 function insertBlock(source: TemplateSource, block: LayoutBlock, beforeId: string | null, containerId: string | null): TemplateSource {
   let layout = source.layout;
   if (beforeId) layout = insertBefore(layout, beforeId, block);
@@ -154,6 +195,7 @@ export function TemplateEditorPage() {
   const [diagnostics, setDiagnostics] = useState<{ path: string; message: string }[] | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [yamlText, setYamlText] = useState("");
+  const [editingFieldId, setEditingFieldId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = () => {
@@ -166,6 +208,7 @@ export function TemplateEditorPage() {
         setEtag(response.etag ?? `"${response.data.controlVersion}"`);
         setPast([]);
         setFuture([]);
+        setEditingFieldId(null);
         setDirty(false);
       })
       .catch((reason: Error) => setError(reason.message))
@@ -181,6 +224,7 @@ export function TemplateEditorPage() {
 
   const selected = useMemo(() => (source && selectedId ? findBlock(source.layout, selectedId) : null), [source, selectedId]);
   const selectedField = useMemo(() => (source && selected?.fieldId ? source.fields.find((item) => item.id === selected.fieldId) ?? null : null), [source, selected]);
+  const editingField = useMemo(() => (source && editingFieldId ? source.fields.find((item) => item.id === editingFieldId) ?? null : null), [source, editingFieldId]);
 
   function commit(next: TemplateSource) {
     if (!source) return;
@@ -294,7 +338,8 @@ export function TemplateEditorPage() {
     if (!source) return;
     const field: TemplateField = { id: makeFieldId(), type, label: "新字段", placeholder: "", help: "", requiredAt: [], options: [] };
     commit({ ...source, fields: [...source.fields, field] });
-    message.success("字段已添加，可从左侧拖入画布");
+    setEditingFieldId(field.id);
+    message.success("字段已添加，可直接编辑");
   }
 
   function deleteField(id: string) {
@@ -302,6 +347,7 @@ export function TemplateEditorPage() {
     const used = findBlock(source.layout, selectedId ?? "")?.fieldId === id || containsField(source.layout, id);
     if (used) { message.warning("该字段仍被画布引用，请先删除对应区块"); return; }
     commit({ ...source, fields: source.fields.filter((field) => field.id !== id) });
+    if (editingFieldId === id) setEditingFieldId(null);
   }
 
   function save(): Promise<TemplateDetail | null> {
@@ -437,7 +483,17 @@ export function TemplateEditorPage() {
           <div className="field-mini-list">
             <div className="pane-title">字段 <span style={{ marginLeft: "auto" }}><Button size="small" type="text" icon={<AppstoreAddOutlined />} onClick={() => addField()}>添加</Button></span></div>
             {source.fields.map((field) => (
-              <div className="field-mini" key={field.id}><FileTextOutlined /><span className="truncate">{field.label}</span><code>{field.type}</code></div>
+              <div
+                className={`field-mini${editingFieldId === field.id ? " selected" : ""}`}
+                key={field.id}
+                role="button"
+                tabIndex={0}
+                title={`编辑字段：${field.label}`}
+                onClick={() => setEditingFieldId(field.id)}
+                onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setEditingFieldId(field.id); } }}
+              >
+                <FileTextOutlined /><span className="truncate">{field.label}</span><code>{field.type}</code>
+              </div>
             ))}
           </div>
         </aside>
@@ -501,19 +557,7 @@ export function TemplateEditorPage() {
               {selectedField && (
                 <div className="property-group">
                   <h3>字段定义</h3>
-                  <label className="form-label">显示名称</label>
-                  <Input value={selectedField.label} onChange={(event) => updateField(selectedField.id, { label: event.target.value })} />
-                  <label className="form-label" style={{ marginTop: 9 }}>字段类型</label>
-                  <Select style={{ width: "100%" }} value={selectedField.type} options={FIELD_TYPES} onChange={(value: FieldType) => updateField(selectedField.id, { type: value })} />
-                  <label className="form-label" style={{ marginTop: 9 }}>占位提示</label>
-                  <Input value={selectedField.placeholder ?? ""} onChange={(event) => updateField(selectedField.id, { placeholder: event.target.value })} />
-                  {selectedField.type === "enum" && <>
-                    <label className="form-label" style={{ marginTop: 9 }}>选项（每行“值|显示名”）</label>
-                    <Input.TextArea rows={4} value={(selectedField.options ?? []).map((option) => `${option.value}|${option.label}`).join("\n")} onChange={(event) => updateField(selectedField.id, { options: event.target.value.split("\n").filter(Boolean).map((line) => { const [value, label] = line.split("|"); return { value: value.trim(), label: (label ?? value).trim() }; }) })} />
-                  </>}
-                  <label className="form-label" style={{ marginTop: 9 }}>必填阶段</label>
-                  <Checkbox.Group value={selectedField.requiredAt} options={STAGES} onChange={(values) => updateField(selectedField.id, { requiredAt: values as Stage[] })} />
-                  <div className="form-hint">字段 ID：<code>{selectedField.id}</code></div>
+                  <FieldDefinitionFields field={selectedField} onChange={(patch) => updateField(selectedField.id, patch)} />
                 </div>
               )}
 
@@ -548,9 +592,12 @@ export function TemplateEditorPage() {
               <div className="property-group">
                 <h3>字段</h3>
                 {source.fields.map((field) => (
-                  <div className="field-row" key={field.id}>
-                    <div className="field-row-main" onClick={() => message.info(`${field.label} · ${field.type}`)}><strong>{field.label}</strong><span>{field.type} · {field.id}</span></div>
-                    <div className="field-row-actions"><button type="button" className="danger" aria-label="删除字段" title="删除字段" onClick={() => deleteField(field.id)}><DeleteOutlined /></button></div>
+                  <div className={`field-row${editingFieldId === field.id ? " selected" : ""}`} key={field.id}>
+                    <div className="field-row-main" role="button" tabIndex={0} onClick={() => setEditingFieldId(field.id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setEditingFieldId(field.id); } }}><strong>{field.label}</strong><span>{field.type} · {field.id}</span></div>
+                    <div className="field-row-actions">
+                      <button type="button" aria-label="编辑字段" title="编辑字段" onClick={() => setEditingFieldId(field.id)}><EditOutlined /></button>
+                      <button type="button" className="danger" aria-label="删除字段" title="删除字段" onClick={() => deleteField(field.id)}><DeleteOutlined /></button>
+                    </div>
                   </div>
                 ))}
                 <Button block icon={<AppstoreAddOutlined />} style={{ marginTop: 8 }} onClick={() => addField()}>添加字段</Button>
@@ -559,6 +606,20 @@ export function TemplateEditorPage() {
           )}
         </aside>
       </div>
+
+      <Drawer
+        title={editingField ? `编辑字段 · ${editingField.label || "未命名"}` : "编辑字段"}
+        width={380}
+        open={editingField !== null}
+        onClose={() => setEditingFieldId(null)}
+        footer={<Button type="primary" onClick={() => setEditingFieldId(null)}>完成</Button>}
+      >
+        {editingField && (
+          <div className="form-stack">
+            <FieldDefinitionFields field={editingField} onChange={(patch) => updateField(editingField.id, patch)} />
+          </div>
+        )}
+      </Drawer>
 
       <Modal title="模板预览" width={860} open={previewOpen} onCancel={() => setPreviewOpen(false)} footer={<Button onClick={() => setPreviewOpen(false)}>关闭</Button>}>
         <Segmented value={previewMode} onChange={(value) => setPreviewMode(value as typeof previewMode)} options={[{ value: "form", label: "表单预览" }, { value: "read", label: "阅读预览" }]} style={{ marginBottom: 16 }} />

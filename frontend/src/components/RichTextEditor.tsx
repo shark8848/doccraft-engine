@@ -7,6 +7,7 @@ import {
   LinkOutlined,
   OrderedListOutlined,
   PictureOutlined,
+  TableOutlined,
   UnorderedListOutlined,
 } from "@ant-design/icons";
 
@@ -46,6 +47,9 @@ function htmlFromDoc(value: JsonRecord | null | undefined): string {
       case "orderedList": return `<ol>${children()}</ol>`;
       case "listItem": return `<li>${children()}</li>`;
       case "blockquote": return `<blockquote>${children()}</blockquote>`;
+      case "table": return `<table><tbody>${children()}</tbody></table>`;
+      case "tableRow": return `<tr>${children()}</tr>`;
+      case "tableCell": return `<${attrs.header ? "th" : "td"}>${children()}</${attrs.header ? "th" : "td"}>`;
       case "hardBreak": return "<br>";
       case "image": return `<img data-asset-id="${escapeHtml(String(attrs.assetId ?? ""))}" alt="${escapeHtml(String(attrs.alt ?? ""))}">`;
       case "doc": return children();
@@ -95,6 +99,13 @@ function inlineNodes(parent: Node, inherited: Mark[] = []): RichNode[] {
   return out;
 }
 
+function tableCellContent(cell: HTMLTableCellElement): RichNode[] {
+  const blocks = Array.from(cell.children)
+    .filter((child) => ["p", "div"].includes(child.tagName.toLowerCase()))
+    .map((child) => ({ type: "paragraph", content: inlineNodes(child) }));
+  return blocks.length ? blocks : [{ type: "paragraph", content: inlineNodes(cell) }];
+}
+
 function blockNode(element: HTMLElement): RichNode | null {
   const tag = element.tagName.toLowerCase();
   if (tag === "p" || tag === "div") return { type: "paragraph", content: inlineNodes(element) };
@@ -105,6 +116,17 @@ function blockNode(element: HTMLElement): RichNode | null {
       type: tag === "ul" ? "bulletList" : "orderedList",
       content: Array.from(element.children).filter((child) => child.tagName.toLowerCase() === "li").map((child) => ({ type: "listItem", content: [{ type: "paragraph", content: inlineNodes(child) }] })),
     };
+  }
+  if (tag === "table") {
+    const rows = Array.from((element as HTMLTableElement).rows).map((row) => ({
+      type: "tableRow",
+      content: Array.from(row.cells).map((cell) => ({
+        type: "tableCell",
+        attrs: { header: cell.tagName.toLowerCase() === "th" },
+        content: tableCellContent(cell),
+      })),
+    }));
+    return rows.length ? { type: "table", content: rows } : null;
   }
   if (tag === "img") {
     const assetId = element.getAttribute("data-asset-id") ?? "";
@@ -170,6 +192,87 @@ export function RichTextEditor({ value, onChange, placeholder = "开始输入正
     if (href) command("createLink", href);
   }
 
+  function currentCell(): HTMLTableCellElement | null {
+    const selection = window.getSelection();
+    const node = selection?.anchorNode;
+    const element = node instanceof HTMLElement ? node : node?.parentElement;
+    return element?.closest("td,th") ?? null;
+  }
+
+  function insertTable() {
+    const input = window.prompt("表格大小（行×列，含表头），例如 3×3", "3×3");
+    if (input === null) return;
+    const match = input.trim().match(/^(\d{1,2})\s*[x×*]\s*(\d{1,2})$/i);
+    const rows = match ? Math.min(Math.max(Number(match[1]), 1), 20) : 0;
+    const columns = match ? Math.min(Math.max(Number(match[2]), 1), 10) : 0;
+    if (!rows || !columns) {
+      message.warning("请输入有效大小，例如 3×3");
+      return;
+    }
+    const header = `<tr>${Array.from({ length: columns }, (_, index) => `<th>列 ${index + 1}</th>`).join("")}</tr>`;
+    const body = Array.from({ length: Math.max(rows - 1, 0) }, () => `<tr>${Array.from({ length: columns }, () => "<td><br></td>").join("")}</tr>`).join("");
+    const existingTables = new Set(ref.current?.querySelectorAll("table"));
+    command("insertHTML", `<table><tbody>${header}${body}</tbody></table><p><br></p>`);
+    const table = Array.from(ref.current?.querySelectorAll("table") ?? []).find((item) => !existingTables.has(item));
+    const firstCell = table?.querySelector<HTMLTableCellElement>("th, td");
+    if (firstCell) {
+      const range = document.createRange();
+      range.selectNodeContents(firstCell);
+      range.collapse(false);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    }
+    message.success(`已插入 ${rows}×${columns} 表格`);
+  }
+
+  function addTableRow() {
+    const cell = currentCell();
+    const row = cell?.parentElement as HTMLTableRowElement | null;
+    if (!cell || !row) {
+      message.warning("请先把光标放到表格内");
+      return;
+    }
+    const nextRow = document.createElement("tr");
+    Array.from(row.cells).forEach(() => {
+      const newCell = document.createElement("td");
+      newCell.innerHTML = "<br>";
+      nextRow.appendChild(newCell);
+    });
+    row.after(nextRow);
+    emit();
+  }
+
+  function addTableColumn() {
+    const cell = currentCell();
+    const table = cell?.closest("table") as HTMLTableElement | null;
+    if (!cell || !table) {
+      message.warning("请先把光标放到表格内");
+      return;
+    }
+    const index = cell.cellIndex;
+    Array.from(table.rows).forEach((row) => {
+      const reference = row.cells[Math.min(index, row.cells.length - 1)];
+      if (!reference) return;
+      const tag = reference.tagName.toLowerCase() === "th" ? "th" : "td";
+      const newCell = document.createElement(tag);
+      newCell.innerHTML = tag === "th" ? `列 ${index + 2}` : "<br>";
+      reference.after(newCell);
+    });
+    emit();
+  }
+
+  function removeTable() {
+    const table = currentCell()?.closest("table");
+    if (!table) {
+      message.warning("请先把光标放到表格内");
+      return;
+    }
+    table.remove();
+    emit();
+    message.success("表格已删除");
+  }
+
   async function uploadImage(files: FileList | null) {
     const file = files?.[0];
     if (!file) return;
@@ -207,6 +310,10 @@ export function RichTextEditor({ value, onChange, placeholder = "开始输入正
         <Tooltip title="引用"><Button type="text" size="small" icon={<CodeOutlined />} onClick={() => command("formatBlock", "<blockquote>")} /></Tooltip>
         <Tooltip title="链接"><Button type="text" size="small" icon={<LinkOutlined />} onClick={addLink} /></Tooltip>
         <Tooltip title="插入图片"><Button type="text" size="small" icon={<PictureOutlined />} loading={uploading} onClick={() => imageRef.current?.click()} /></Tooltip>
+        <Tooltip title="插入表格"><Button type="text" size="small" icon={<TableOutlined />} aria-label="插入表格" onClick={insertTable} /></Tooltip>
+        <Tooltip title="增加表格行"><Button type="text" size="small" aria-label="增加表格行" onMouseDown={(event) => event.preventDefault()} onClick={addTableRow}>+行</Button></Tooltip>
+        <Tooltip title="增加表格列"><Button type="text" size="small" aria-label="增加表格列" onMouseDown={(event) => event.preventDefault()} onClick={addTableColumn}>+列</Button></Tooltip>
+        <Tooltip title="删除表格"><Button type="text" size="small" aria-label="删除表格" onMouseDown={(event) => event.preventDefault()} onClick={removeTable}>删表</Button></Tooltip>
       </div>
       <div
         ref={ref}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   App,
@@ -367,7 +367,7 @@ function ReadBlock({ block, fields, values }: { block: LayoutBlock; fields: Temp
 function RichRead({ value }: { value: JsonRecord }) {
   const render = (node: JsonRecord): React.ReactNode => {
     const type = String(node.type ?? "");
-    const children = Array.isArray(node.content) ? (node.content as JsonRecord[]).map((child, index) => <span key={index}>{render(child)}</span>) : null;
+    const children = Array.isArray(node.content) ? <>{((node.content as JsonRecord[]).map((child, index) => <Fragment key={index}>{render(child)}</Fragment>))}</> : null;
     if (type === "text") return String(node.text ?? "");
     if (type === "paragraph") return <p>{children}</p>;
     if (type === "heading") return <h2>{children}</h2>;
@@ -375,6 +375,9 @@ function RichRead({ value }: { value: JsonRecord }) {
     if (type === "orderedList") return <ol>{children}</ol>;
     if (type === "listItem") return <li>{children}</li>;
     if (type === "blockquote") return <blockquote>{children}</blockquote>;
+    if (type === "table") return <table><tbody>{children}</tbody></table>;
+    if (type === "tableRow") return <tr>{children}</tr>;
+    if (type === "tableCell") return (node.attrs as JsonRecord | undefined)?.header ? <th>{children}</th> : <td>{children}</td>;
     if (type === "hardBreak") return <br />;
     return <>{children}</>;
   };

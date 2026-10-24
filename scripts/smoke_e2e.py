@@ -65,6 +65,25 @@ def main() -> None:
                 "type": "doc",
                 "content": [
                     {"type": "paragraph", "content": [{"type": "text", "text": "先检查电源，再执行启动步骤。"}]},
+                    {
+                        "type": "table",
+                        "content": [
+                            {
+                                "type": "tableRow",
+                                "content": [
+                                    {"type": "tableCell", "attrs": {"header": True}, "content": [{"type": "paragraph", "content": [{"type": "text", "text": "步骤"}]}]},
+                                    {"type": "tableCell", "attrs": {"header": True}, "content": [{"type": "paragraph", "content": [{"type": "text", "text": "操作"}]}]},
+                                ],
+                            },
+                            {
+                                "type": "tableRow",
+                                "content": [
+                                    {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "1"}]}]},
+                                    {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "长按复位键"}]}]},
+                                ],
+                            },
+                        ],
+                    },
                     {"type": "image", "attrs": {"assetId": asset_id, "alt": "验证图片"}},
                 ],
             },
@@ -83,7 +102,7 @@ def main() -> None:
 
         hits: list[dict] = []
         for _ in range(20):
-            hits = check(client.get("/api/v1/search", params={"q": "电源"})).json()["items"]
+            hits = check(client.get("/api/v1/search", params={"q": "复位"})).json()["items"]
             if any(item["documentId"] == document_id for item in hits):
                 break
             time.sleep(0.5)
@@ -91,6 +110,7 @@ def main() -> None:
 
         reading = check(client.get(f"/api/v1/documents/{document_id}/published")).json()
         assert reading["content"]["title"] == values["title"]
+        assert reading["content"]["body"]["content"][1]["type"] == "table"
         print(
             "E2E OK",
             f"template={template['id']}",

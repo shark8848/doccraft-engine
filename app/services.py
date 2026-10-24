@@ -85,7 +85,7 @@ DEFAULT_TEMPLATE: dict[str, Any] = {
             "type": "richtext",
             "label": "正文",
             "placeholder": "",
-            "help": "支持段落、列表、标题、链接与图片",
+            "help": "支持段落、列表、标题、表格、链接与图片",
             "requiredAt": ["submit", "publish"],
             "options": [],
         },

@@ -95,7 +95,7 @@ PostgreSQL 表为 `templates`、`template_versions`、`documents`、`revisions`�
 
 ## 文档采编与发布
 
-创建文档时固定当前已发布的 `template_version_id`。编辑页根据模板布局生成字段控件；富文本以 JSON AST 保存，当前支持段落、二级/三级标题、项目符号/编号列表、引用、链接、粗体、斜体、行内代码、换行和图片。
+创建文档时固定当前已发布的 `template_version_id`。编辑页根据模板布局生成字段控件；富文本以 JSON AST 保存，当前支持段落、二级/三级标题、项目符号/编号列表、引用、链接、粗体、斜体、行内代码、换行、图片和表格。表格节点使用 `table/tableRow/tableCell`，支持插入带表头表格、在光标所在表格中增行/增列和删除表格；发布阅读与检索纯文本提取复用同一 AST。
 
 草稿保存协议：
 
@@ -152,7 +152,7 @@ PostgreSQL 表为 `templates`、`template_versions`、`documents`、`revisions`�
 
 默认 `DOCCRAFT_AUTO_CREATE_SCHEMA=true` 由 ORM 元数据建表；`migrations/001_initial.sql` 提供等价 DDL。`DOCCRAFT_AUTO_INIT_INDICES=true` 创建两个 ES 索引。生产环境应关闭自动建表/建索引，改由显式迁移和索引发布流程接管。
 
-镜像由 `Dockerfile` 构建，入口角色支持 `web/api/worker`。默认 `web` 同时启动 API、Worker 与 HAProxy：仅暴露 `5290` Web 入口和 `8404` 状态页，API 内部监听 `127.0.0.1:8100`。PG/ES/PyUploadX 通过环境变量连接，不进入本仓库 Compose 生命周期。
+镜像由 `Dockerfile` 构建，入口角色支持 `web/api/worker`。默认 `web` 同时启动 API、Worker 与 HAProxy：仅暴露 `5290` Web 入口和 `8411` 状态页，API 内部监听 `127.0.0.1:8100`。`scripts/build_docker.sh` 负责构建/导出，`scripts/start_docker.sh` 负责加载、启动与健康等待，`scripts/stop_docker.sh` 负责停止；PG/ES/PyUploadX 通过环境变量连接，不进入本仓库 Compose 生命周期。
 
 ## 安全边界与后续路线
 

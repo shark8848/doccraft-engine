@@ -34,7 +34,7 @@ export function starterTemplate(name: string, description = ""): TemplateSource 
     fields: [
       { id: titleId, type: "string", label: "标题", placeholder: "输入文档标题", help: "", requiredAt: ["submit", "publish"], options: [] },
       { id: summaryId, type: "text", label: "摘要", placeholder: "用一两句话概括内容", help: "", requiredAt: ["submit", "publish"], options: [] },
-      { id: bodyId, type: "richtext", label: "正文", placeholder: "", help: "支持段落、标题、列表、链接与图片", requiredAt: ["publish"], options: [] },
+      { id: bodyId, type: "richtext", label: "正文", placeholder: "", help: "支持段落、标题、列表、表格、链接与图片", requiredAt: ["publish"], options: [] },
     ],
     layout: {
       id: "root",

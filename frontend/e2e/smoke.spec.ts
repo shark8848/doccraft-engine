@@ -15,6 +15,13 @@ test("核心导航、模板设计器与主题切换", async ({ page }) => {
   await expect(page.locator(".canvas-sheet")).toBeVisible();
   await expect(page.locator(".palette-item")).toHaveCount(7);
 
+  await page.locator(".field-row-main").first().click();
+  await expect(page.locator(".ant-drawer")).toContainText("编辑字段");
+  await page.locator(".ant-drawer").getByRole("textbox").first().fill("文档标题");
+  await expect(page.locator(".ant-drawer-title")).toContainText("文档标题");
+  await page.locator(".ant-drawer-footer").getByRole("button", { name: /完\s*成/ }).click();
+  await expect(page.locator(".field-row").first()).toContainText("文档标题");
+
   await page.locator(".palette-item").filter({ hasText: "说明" }).click();
   await expect(page.getByText("有未保存改动", { exact: false })).toBeVisible();
   await page.getByRole("button", { name: "撤销" }).click();
@@ -39,6 +46,18 @@ test("检索结果进入文档编辑器", async ({ page }) => {
   await expect(page.locator(".document-paper")).toBeVisible();
   await expect(page.locator(".rich-content")).toContainText("先检查电源");
   await expect(page.getByText("发布校验")).toBeVisible();
+
+  page.once("dialog", async (dialog) => { await dialog.accept("3x3"); });
+  await page.getByRole("button", { name: "插入表格" }).click();
+  await expect(page.locator(".rich-content table")).toHaveCount(1);
+  await expect(page.locator(".rich-content table th")).toHaveCount(3);
+  await page.getByRole("button", { name: "增加表格行" }).click();
+  await expect(page.locator(".rich-content table tr")).toHaveCount(4);
+  await page.getByRole("button", { name: "增加表格列" }).click();
+  await expect(page.locator(".rich-content table th")).toHaveCount(4);
+  await expect(page.locator(".rich-content table td")).toHaveCount(12);
+  await page.getByRole("button", { name: "删除表格" }).click();
+  await expect(page.locator(".rich-content table")).toHaveCount(0);
 });
 
 test("窄屏无横向溢出并保留单列交互", async ({ page }) => {

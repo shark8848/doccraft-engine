@@ -11,7 +11,7 @@
 3. 控制面：PostgreSQL ORM 与首期 DDL、ES revision/发布索引、PyUploadX Client 网关、开发身份、发布检查、资产引用检查。
 4. Worker：图片 Pillow 校验、资产状态推进、Outbox 发布投影与失败重试。
 5. Web：`ikc-demo`/`WeKnora` 对齐的应用壳、四主题、页头/工具条/卡片/空状态/抽屉/消息、模板与文档编辑、阅读、检索和媒体库。
-6. 交付：`requirements.txt`、Dockerfile、Compose、HAProxy、构建导出脚本与运行说明。
+6. 交付：`requirements.txt`、Dockerfile、Compose、HAProxy、构建/启动/停止脚本与运行说明。
 
 ## 已验证门槛
 

@@ -67,7 +67,21 @@ def test_search_projection_extracts_richtext_text() -> None:
         "title": "安装指南",
         "body": {
             "type": "doc",
-            "content": [{"type": "paragraph", "content": [{"type": "text", "text": "先检查电源"}]}],
+            "content": [
+                {"type": "paragraph", "content": [{"type": "text", "text": "先检查电源"}]},
+                {
+                    "type": "table",
+                    "content": [
+                        {
+                            "type": "tableRow",
+                            "content": [
+                                {"type": "tableCell", "attrs": {"header": True}, "content": [{"type": "paragraph", "content": [{"type": "text", "text": "步骤"}]}]},
+                                {"type": "tableCell", "attrs": {"header": True}, "content": [{"type": "paragraph", "content": [{"type": "text", "text": "操作"}]}]},
+                            ],
+                        }
+                    ],
+                },
+            ],
         },
     }
     document = build_search_document(
@@ -80,4 +94,5 @@ def test_search_projection_extracts_richtext_text() -> None:
         generation=1,
     )
     assert "先检查电源" in document["fullText"]
+    assert "步骤 操作" in document["fullText"]
     assert document["status"] == "published"

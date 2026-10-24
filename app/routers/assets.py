@@ -179,11 +179,15 @@ async def get_asset_content(
             detail={"code": "STORAGE_UNAVAILABLE", "message": str(exc)},
         ) from exc
     filename = safe_filename(asset.original_name)
+    suffix = Path(filename).suffix[:16]
+    if not suffix.isascii():
+        suffix = ""
+    fallback_name = f"doccraft-{asset.id}{suffix}"
     return FileResponse(
         temp_path,
         media_type=asset.mime_type,
         headers={
-            "Content-Disposition": f"inline; filename=\"{filename}\"; filename*=UTF-8''{quote(filename)}",
+            "Content-Disposition": f"inline; filename=\"{fallback_name}\"; filename*=UTF-8''{quote(filename, safe='')}",
             "Cache-Control": "private, max-age=300",
             "X-Content-Type-Options": "nosniff",
         },

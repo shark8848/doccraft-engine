@@ -52,6 +52,6 @@ cat <<EOF
 部署：
   1) docker load -i ${EXPORT}
   2) cp .env.example .env，填写本地 PG/ES/PyUploadX 地址
-  3) docker compose up -d
+  3) bash scripts/start_docker.sh
   4) curl -fsS http://127.0.0.1:5290/healthz
 EOF
