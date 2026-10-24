@@ -54,6 +54,27 @@ def test_required_at_is_enforced_per_stage() -> None:
     assert validate_content(source, {"title": "标题"}, "draft") == []
 
 
+def test_unused_fields_are_not_compiled_or_validated() -> None:
+    source = minimal_template()
+    source["fields"].append(
+        {
+            "id": "old_field",
+            "type": "string",
+            "label": "已删除区块留下的旧字段",
+            "requiredAt": ["publish"],
+        }
+    )
+    compiled = compile_template(source)
+    assert "old_field" not in compiled["schemas"]["publish"]["properties"]
+    assert "old_field" not in compiled["schemas"]["publish"]["required"]
+    assert "old_field" not in compiled["dependencies"]
+    assert validate_content(
+        source,
+        {"title": "标题", "body": {"type": "doc", "content": []}, "old_field": "旧值"},
+        "publish",
+    ) == []
+
+
 def test_yaml_round_trip_and_merge_key_rejection() -> None:
     yaml_text = export_yaml_template(minimal_template())
     assert parse_yaml_template(yaml_text)["metadata"]["name"] == "测试模板"

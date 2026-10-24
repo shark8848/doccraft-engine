@@ -46,6 +46,7 @@ import {
   insertBefore,
   isContainer,
   parentOf,
+  referencedFieldIds,
   removeBlock,
   updateBlock,
   updateFieldReferences,
@@ -298,11 +299,25 @@ export function TemplateEditorPage() {
     if (!source) return;
     const block = findBlock(source.layout, id);
     if (!block) return;
-    if (isContainer(block) && block.children.length > 0) {
-      modal.confirm({ title: "删除整个区块？", content: "区块内的子区块会一并删除。", okText: "删除", okButtonProps: { danger: true }, cancelText: "取消", onOk: () => { commit({ ...source, layout: removeBlock(source.layout, id) }); setSelectedId(null); } });
-    } else {
-      commit({ ...source, layout: removeBlock(source.layout, id) });
+    const remove = () => {
+      const layout = removeBlock(source.layout, id);
+      const removedFields = referencedFieldIds(block);
+      const remainingFields = referencedFieldIds(layout);
+      const indexedFields = new Set([
+        source.indexing.titleField,
+        source.indexing.summaryField,
+        source.indexing.fullTextField,
+      ].filter(Boolean));
+      const fields = source.fields.filter((field) =>
+        !removedFields.has(field.id) || remainingFields.has(field.id) || indexedFields.has(field.id)
+      );
+      commit({ ...source, layout, fields });
       setSelectedId(null);
+    };
+    if (isContainer(block) && block.children.length > 0) {
+      modal.confirm({ title: "删除整个区块？", content: "区块内的子区块及不再被引用的字段会一并删除。", okText: "删除", okButtonProps: { danger: true }, cancelText: "取消", onOk: remove });
+    } else {
+      remove();
     }
   }
 
@@ -346,7 +361,16 @@ export function TemplateEditorPage() {
     if (!source) return;
     const used = findBlock(source.layout, selectedId ?? "")?.fieldId === id || containsField(source.layout, id);
     if (used) { message.warning("该字段仍被画布引用，请先删除对应区块"); return; }
-    commit({ ...source, fields: source.fields.filter((field) => field.id !== id) });
+    if (source.indexing.titleField === id) {
+      message.warning("该字段当前作为标题索引字段，请先切换标题字段");
+      return;
+    }
+    const indexing = {
+      ...source.indexing,
+      summaryField: source.indexing.summaryField === id ? "" : source.indexing.summaryField,
+      fullTextField: source.indexing.fullTextField === id ? "" : source.indexing.fullTextField,
+    };
+    commit({ ...source, fields: source.fields.filter((field) => field.id !== id), indexing });
     if (editingFieldId === id) setEditingFieldId(null);
   }
 

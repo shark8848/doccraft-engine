@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { App, Button, Tooltip } from "antd";
+import { App, Button, InputNumber, Modal, Tooltip } from "antd";
 import {
   BoldOutlined,
   CodeOutlined,
+  DeleteOutlined,
+  InsertRowBelowOutlined,
+  InsertRowRightOutlined,
   ItalicOutlined,
   LinkOutlined,
   OrderedListOutlined,
@@ -153,7 +156,12 @@ export function RichTextEditor({ value, onChange, placeholder = "开始输入正
   const { message } = App.useApp();
   const ref = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLInputElement>(null);
+  const tableRangeRef = useRef<Range | null>(null);
+  const insertedTableIndexRef = useRef<number | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [tableDialogOpen, setTableDialogOpen] = useState(false);
+  const [tableRows, setTableRows] = useState(3);
+  const [tableColumns, setTableColumns] = useState(3);
   const objectUrls = useRef<string[]>([]);
 
   useEffect(() => {
@@ -199,30 +207,32 @@ export function RichTextEditor({ value, onChange, placeholder = "开始输入正
     return element?.closest("td,th") ?? null;
   }
 
+  function openTableDialog() {
+    const selection = window.getSelection();
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    tableRangeRef.current = range && ref.current?.contains(range.commonAncestorContainer) ? range.cloneRange() : null;
+    setTableRows(3);
+    setTableColumns(3);
+    setTableDialogOpen(true);
+  }
+
   function insertTable() {
-    const input = window.prompt("表格大小（行×列，含表头），例如 3×3", "3×3");
-    if (input === null) return;
-    const match = input.trim().match(/^(\d{1,2})\s*[x×*]\s*(\d{1,2})$/i);
-    const rows = match ? Math.min(Math.max(Number(match[1]), 1), 20) : 0;
-    const columns = match ? Math.min(Math.max(Number(match[2]), 1), 10) : 0;
-    if (!rows || !columns) {
-      message.warning("请输入有效大小，例如 3×3");
-      return;
-    }
+    const rows = Math.min(Math.max(tableRows, 1), 20);
+    const columns = Math.min(Math.max(tableColumns, 1), 10);
     const header = `<tr>${Array.from({ length: columns }, (_, index) => `<th>列 ${index + 1}</th>`).join("")}</tr>`;
     const body = Array.from({ length: Math.max(rows - 1, 0) }, () => `<tr>${Array.from({ length: columns }, () => "<td><br></td>").join("")}</tr>`).join("");
     const existingTables = new Set(ref.current?.querySelectorAll("table"));
-    command("insertHTML", `<table><tbody>${header}${body}</tbody></table><p><br></p>`);
-    const table = Array.from(ref.current?.querySelectorAll("table") ?? []).find((item) => !existingTables.has(item));
-    const firstCell = table?.querySelector<HTMLTableCellElement>("th, td");
-    if (firstCell) {
-      const range = document.createRange();
-      range.selectNodeContents(firstCell);
-      range.collapse(false);
+    ref.current?.focus();
+    if (tableRangeRef.current) {
       const selection = window.getSelection();
       selection?.removeAllRanges();
-      selection?.addRange(range);
+      selection?.addRange(tableRangeRef.current);
     }
+    command("insertHTML", `<table><tbody>${header}${body}</tbody></table><p><br></p>`);
+    const tables = Array.from(ref.current?.querySelectorAll("table") ?? []);
+    const insertedTable = tables.find((item) => !existingTables.has(item));
+    insertedTableIndexRef.current = insertedTable ? tables.indexOf(insertedTable) : null;
+    setTableDialogOpen(false);
     message.success(`已插入 ${rows}×${columns} 表格`);
   }
 
@@ -310,10 +320,10 @@ export function RichTextEditor({ value, onChange, placeholder = "开始输入正
         <Tooltip title="引用"><Button type="text" size="small" icon={<CodeOutlined />} onClick={() => command("formatBlock", "<blockquote>")} /></Tooltip>
         <Tooltip title="链接"><Button type="text" size="small" icon={<LinkOutlined />} onClick={addLink} /></Tooltip>
         <Tooltip title="插入图片"><Button type="text" size="small" icon={<PictureOutlined />} loading={uploading} onClick={() => imageRef.current?.click()} /></Tooltip>
-        <Tooltip title="插入表格"><Button type="text" size="small" icon={<TableOutlined />} aria-label="插入表格" onClick={insertTable} /></Tooltip>
-        <Tooltip title="增加表格行"><Button type="text" size="small" aria-label="增加表格行" onMouseDown={(event) => event.preventDefault()} onClick={addTableRow}>+行</Button></Tooltip>
-        <Tooltip title="增加表格列"><Button type="text" size="small" aria-label="增加表格列" onMouseDown={(event) => event.preventDefault()} onClick={addTableColumn}>+列</Button></Tooltip>
-        <Tooltip title="删除表格"><Button type="text" size="small" aria-label="删除表格" onMouseDown={(event) => event.preventDefault()} onClick={removeTable}>删表</Button></Tooltip>
+        <Tooltip title="插入表格"><Button type="text" size="small" icon={<TableOutlined />} aria-label="插入表格" onClick={openTableDialog} /></Tooltip>
+        <Tooltip title="增加表格行"><Button type="text" size="small" icon={<InsertRowBelowOutlined />} aria-label="增加表格行" onMouseDown={(event) => event.preventDefault()} onClick={addTableRow} /></Tooltip>
+        <Tooltip title="增加表格列"><Button type="text" size="small" icon={<InsertRowRightOutlined />} aria-label="增加表格列" onMouseDown={(event) => event.preventDefault()} onClick={addTableColumn} /></Tooltip>
+        <Tooltip title="删除表格"><Button type="text" size="small" icon={<DeleteOutlined />} aria-label="删除表格" onMouseDown={(event) => event.preventDefault()} onClick={removeTable} /></Tooltip>
       </div>
       <div
         ref={ref}
@@ -326,6 +336,43 @@ export function RichTextEditor({ value, onChange, placeholder = "开始输入正
         data-placeholder={placeholder}
         onInput={emit}
       />
+      <Modal
+        title="插入表格"
+        open={tableDialogOpen}
+        centered
+        width={360}
+        okText="插入"
+        cancelText="取消"
+        onOk={insertTable}
+        onCancel={() => setTableDialogOpen(false)}
+        focusable={{ focusTriggerAfterClose: false }}
+        afterClose={() => {
+          const tableIndex = insertedTableIndexRef.current;
+          insertedTableIndexRef.current = null;
+          if (tableIndex === null) return;
+          const cell = Array.from(ref.current?.querySelectorAll("table") ?? [])[tableIndex]?.querySelector<HTMLTableCellElement>("th, td");
+          if (!cell) return;
+          ref.current?.focus();
+          const range = document.createRange();
+          range.selectNodeContents(cell);
+          range.collapse(false);
+          const selection = window.getSelection();
+          selection?.removeAllRanges();
+          selection?.addRange(range);
+        }}
+      >
+        <div className="table-size-fields">
+          <label>
+            <span>行数</span>
+            <InputNumber aria-label="表格行数" min={1} max={20} precision={0} value={tableRows} onChange={(value) => setTableRows(value ?? 1)} />
+          </label>
+          <label>
+            <span>列数</span>
+            <InputNumber aria-label="表格列数" min={1} max={10} precision={0} value={tableColumns} onChange={(value) => setTableColumns(value ?? 1)} />
+          </label>
+        </div>
+        <div className="form-hint">首行将作为表头，插入后可使用工具栏增行、增列或删除表格。</div>
+      </Modal>
     </div>
   );
 }

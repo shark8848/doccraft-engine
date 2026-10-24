@@ -373,6 +373,9 @@ button, input, textarea, select { font: inherit; }
 .rich-content blockquote { margin: 10px 0; padding: 4px 12px; border-left: 3px solid var(--accent); color: var(--text-dim); }
 .rich-content img { max-width: 100%; max-height: 360px; border-radius: 8px; }
 .rich-content ul { padding-left: 22px; }
+.table-size-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+.table-size-fields label { display: grid; gap: 6px; color: var(--text-dim); font-size: var(--text-sm); }
+.table-size-fields .ant-input-number { width: 100%; }
 .rich-content table { width: 100%; margin: 12px 0; border-collapse: collapse; table-layout: fixed; }
 .rich-content th, .rich-content td { padding: 7px 9px; border: 1px solid var(--border); vertical-align: top; text-align: left; }
 .rich-content th { background: var(--bg-subtle); font-weight: 650; }

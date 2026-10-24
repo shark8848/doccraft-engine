@@ -210,6 +210,28 @@ class TemplateSource(BaseModel):
         return self
 
 
+def _active_field_ids(source: TemplateSource) -> set[str]:
+    active: set[str] = set()
+
+    def walk(block: LayoutBlock) -> None:
+        if block.fieldId:
+            active.add(block.fieldId)
+        for child in block.children:
+            walk(child)
+
+    walk(source.layout)
+    active.update(
+        field_id
+        for field_id in (
+            source.indexing.titleField,
+            source.indexing.summaryField,
+            source.indexing.fullTextField,
+        )
+        if field_id
+    )
+    return active
+
+
 def _json_type(field: TemplateField) -> dict[str, Any]:
     if field.type in {"string", "text"}:
         schema: dict[str, Any] = {"type": "string", "maxLength": 100_000}
@@ -267,17 +289,19 @@ def compile_template(source_dict: dict[str, Any]) -> dict[str, Any]:
         ]
         raise TemplateCompileError(diagnostics) from exc
 
-    fields = {item.id: item for item in source.fields}
+    active_ids = _active_field_ids(source)
+    active_fields = [field for field in source.fields if field.id in active_ids]
+    fields = {item.id: item for item in active_fields}
     stage_schemas: dict[str, Any] = {}
     for stage in STAGES:
         required = [
-            field.id for field in source.fields if stage in field.requiredAt
+            field.id for field in active_fields if stage in field.requiredAt
         ]
         stage_schemas[stage] = {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "type": "object",
             "additionalProperties": False,
-            "properties": {field.id: _json_type(field) for field in source.fields},
+            "properties": {field.id: _json_type(field) for field in active_fields},
             "required": required,
         }
 
@@ -297,7 +321,7 @@ def compile_template(source_dict: dict[str, Any]) -> dict[str, Any]:
             "summaryField": source.indexing.summaryField,
             "fullTextField": source.indexing.fullTextField,
         },
-        "dependencies": {field.id: [] for field in source.fields},
+        "dependencies": {field.id: [] for field in active_fields},
     }
 
 
@@ -325,13 +349,15 @@ def validate_content(
     source_dict: dict[str, Any], values: dict[str, Any], stage: Literal["draft", "submit", "publish"]
 ) -> list[Diagnostic]:
     source = TemplateSource.model_validate(source_dict)
-    fields = {item.id: item for item in source.fields}
+    active_ids = _active_field_ids(source)
+    fields = {item.id: item for item in source.fields if item.id in active_ids}
+    declared_ids = {item.id for item in source.fields}
     diagnostics: list[Diagnostic] = []
     for key in values:
-        if key not in fields:
+        if key not in fields and key not in declared_ids:
             diagnostics.append(Diagnostic(path=key, message="未知字段"))
 
-    for field in source.fields:
+    for field in fields.values():
         value = values.get(field.id)
         required = stage in field.requiredAt
         if value is None or value == "" or value == [] or value == {}:
