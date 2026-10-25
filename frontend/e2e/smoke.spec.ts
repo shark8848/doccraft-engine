@@ -81,6 +81,27 @@ test("检索结果进入文档编辑器", async ({ page }) => {
   await expect(page.locator(".rich-content table")).toHaveCount(0);
 });
 
+test("数据源管理显示浙江地市动态选项", async ({ page }) => {
+  await page.goto("/#/data-sources");
+  await expect(page.getByRole("heading", { name: "数据源", exact: true })).toBeVisible();
+  const row = page.locator("tr").filter({ hasText: "浙江省地市" });
+  await expect(row).toContainText("biz_region_city");
+  await row.getByRole("button", { name: /选\s*项/ }).click();
+  await expect(page.locator(".ant-drawer")).toContainText("杭州市");
+  await expect(page.locator(".ant-drawer")).toContainText("丽水市");
+});
+
+test("模板单选可以绑定系统数据源", async ({ page }) => {
+  await page.goto("/#/templates");
+  await page.locator(".resource-card").first().click();
+  await page.locator(".field-row-main").first().click();
+  const drawer = page.locator(".ant-drawer");
+  await drawer.locator(".ant-select").first().click();
+  await page.locator(".ant-select-item-option").filter({ hasText: "单选" }).click();
+  await drawer.getByText("系统数据源", { exact: true }).click();
+  await expect(drawer.getByText("浙江省地市", { exact: true })).toBeVisible();
+});
+
 test("窄屏无横向溢出并保留单列交互", async ({ page }) => {
   await page.goto("/#/templates");
   await expect(page.locator(".card-grid")).toBeVisible();

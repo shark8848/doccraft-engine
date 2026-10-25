@@ -45,7 +45,7 @@ PostgreSQL 表为 `templates`、`template_versions`、`documents`、`revisions`�
 
 ## 模板协议
 
-模板由 `metadata`、`fields[]`、`layout`、`workflow`、`indexing` 组成，`schemaVersion=1`。字段与区块使用稳定 ID；支持 `string/text/enum/array/object/number/boolean/date/asset/richtext`，布局支持 `stack/section/columns/field/richText/asset/staticText`。
+模板由 `metadata`、`fields[]`、`layout`、`workflow`、`indexing` 组成，`schemaVersion=1`。字段与区块使用稳定 ID；支持 `string/text/enum/array/object/number/boolean/date/asset/richtext`，布局支持 `stack/section/columns/field/richText/asset/staticText`。单选字段可用 `optionsSource.sourceId` 绑定动态数据源；静态 `options` 与 `optionsSource` 二选一。
 
 服务端 `app/compiler.py` 负责：
 
@@ -79,6 +79,14 @@ PostgreSQL 表为 `templates`、`template_versions`、`documents`、`revisions`�
 ```
 
 `workflow.singleReview` 已进入协议模型，但首期发布端点采用“发布者直接发布”，审核状态机属于后续能力。
+
+### 动态选项数据源
+
+- `option_sources` 保存租户级数据源配置：业务表、值字段、显示字段、搜索字段、启用字段和排序字段。
+- 模板只保存稳定的数据源 ID，不保存表名、列名或 SQL；业务表名必须使用 `biz_` 前缀，模块通过结构化标识符校验后参数化查询。
+- `GET /option-sources/{id}/options` 支持远程搜索和数量上限；`POST /option-sources/{id}/resolve` 用于回显已选值和发布校验。
+- 草稿保存只做基础类型校验；发布时重新解析动态值，已删除或停用的选项返回字段级诊断并拒绝发布。
+- 首个业务表为 `biz_region_city`，种子包含浙江省 11 个地市；默认数据源为`浙江省地市`。
 
 ### 可视化编辑
 
@@ -146,11 +154,12 @@ PostgreSQL 表为 `templates`、`template_versions`、`documents`、`revisions`�
 | 会话 | `GET /api/v1/session` |
 | 模板 | `GET/POST /api/v1/templates`、`GET /templates/{id}`、`PUT /templates/{id}/draft`、`POST /templates/{id}/validate`、`POST /templates/{id}/publish` |
 | 模板 YAML | `POST /api/v1/templates/import/yaml`、`GET /api/v1/templates/{id}/export.yaml` |
+| 数据源 | `GET/POST /api/v1/option-sources`、`PUT /option-sources/{id}`、`GET /option-sources/{id}/options`、`POST /option-sources/{id}/resolve` |
 | 文档 | `GET/POST /api/v1/documents`、`GET /documents/{id}`、`PUT /documents/{id}/draft`、`POST /documents/{id}/publish`、`GET /documents/{id}/published` |
 | 资产 | `GET/POST /api/v1/assets`、`GET /assets/{id}`、`GET /assets/{id}/content` |
 | 检索 | `GET /api/v1/search?q=...` |
 
-默认 `DOCCRAFT_AUTO_CREATE_SCHEMA=true` 由 ORM 元数据建表；`migrations/001_initial.sql` 提供等价 DDL。`DOCCRAFT_AUTO_INIT_INDICES=true` 创建两个 ES 索引。生产环境应关闭自动建表/建索引，改由显式迁移和索引发布流程接管。
+默认 `DOCCRAFT_AUTO_CREATE_SCHEMA=true` 由 ORM 元数据建表；`migrations/001_initial.sql` 和 `migrations/002_option_sources.sql` 提供等价 DDL 与地市种子。`DOCCRAFT_AUTO_INIT_INDICES=true` 创建两个 ES 索引。生产环境应关闭自动建表/建索引，改由显式迁移和索引发布流程接管。
 
 镜像由 `Dockerfile` 构建，入口角色支持 `web/api/worker`。默认 `web` 同时启动 API、Worker 与 HAProxy：仅暴露 `5290` Web 入口和 `8411` 状态页，API 内部监听 `127.0.0.1:8100`。`scripts/build_docker.sh` 负责构建/导出，`scripts/start_docker.sh` 负责加载、启动与健康等待，`scripts/stop_docker.sh` 负责停止；PG/ES/PyUploadX 通过环境变量连接，不进入本仓库 Compose 生命周期。
 

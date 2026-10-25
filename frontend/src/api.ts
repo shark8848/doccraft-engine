@@ -2,6 +2,9 @@ import type {
   Asset,
   DocumentSummary,
   JsonRecord,
+  OptionItem,
+  OptionSource,
+  OptionSourcePayload,
   SearchHit,
   SessionInfo,
   TemplateDetail,
@@ -94,6 +97,21 @@ export const api = {
     if (!response.ok) throw new ApiError(response.status, { message: "导出 YAML 失败" });
     return response.text();
   },
+  optionSources: async () =>
+    (await request<{ items: OptionSource[] }>("/option-sources")).data.items,
+  createOptionSource: async (payload: OptionSourcePayload) =>
+    (await request<OptionSource>("/option-sources", { method: "POST", body: payload })).data,
+  updateOptionSource: async (id: string, payload: OptionSourcePayload) =>
+    (await request<OptionSource>(`/option-sources/${id}`, { method: "PUT", body: payload })).data,
+  optionItems: async (id: string, query = "", limit = 50) =>
+    (await request<{ items: OptionItem[] }>(
+      `/option-sources/${id}/options?query=${encodeURIComponent(query)}&limit=${limit}`,
+    )).data.items,
+  resolveOptionItems: async (id: string, values: string[]) =>
+    (await request<{ items: OptionItem[]; missing: string[] }>(`/option-sources/${id}/resolve`, {
+      method: "POST",
+      body: { values },
+    })).data,
   documents: async () => (await request<{ items: DocumentSummary[] }>("/documents")).data.items,
   document: async (id: string) => request<DocumentSummary>(`/documents/${id}`),
   createDocument: async (templateId: string, title: string) =>

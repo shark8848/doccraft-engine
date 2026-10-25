@@ -1,6 +1,6 @@
 services:
   doccraft:
-    image: ${DOCCRAFT_IMAGE:-doccraft-engine:0.1.0}
+    image: ${DOCCRAFT_IMAGE:-doccraft-engine:0.2.0}
     restart: unless-stopped
     env_file: .env
     environment:

@@ -15,7 +15,7 @@ from sqlalchemy import text
 from app.config import get_settings
 from app.db import SessionLocal, engine, init_schema
 from app.es import ElasticsearchStore, SearchUnavailable
-from app.routers import assets, documents, search, templates
+from app.routers import assets, documents, option_sources, search, templates
 from app.seed import seed_examples
 from app.storage import PyUploadXStorage, StorageUnavailable
 
@@ -166,6 +166,7 @@ app.include_router(templates.router, prefix=get_settings().api_prefix)
 app.include_router(documents.router, prefix=get_settings().api_prefix)
 app.include_router(assets.router, prefix=get_settings().api_prefix)
 app.include_router(search.router, prefix=get_settings().api_prefix)
+app.include_router(option_sources.router, prefix=get_settings().api_prefix)
 
 
 WEB_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"

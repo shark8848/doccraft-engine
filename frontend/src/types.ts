@@ -17,6 +17,10 @@ export interface FieldOption {
   value: string;
 }
 
+export interface FieldOptionsSource {
+  sourceId: string;
+}
+
 export interface TemplateField {
   id: string;
   type: FieldType;
@@ -25,6 +29,7 @@ export interface TemplateField {
   help?: string;
   requiredAt: Stage[];
   options?: FieldOption[];
+  optionsSource?: FieldOptionsSource;
 }
 
 export interface LayoutBlock {
@@ -108,6 +113,39 @@ export interface SessionInfo {
   role: string;
   authMode: string;
   version: string;
+}
+
+export interface OptionItem {
+  value: string;
+  label: string;
+}
+
+export interface OptionSource {
+  id: string;
+  name: string;
+  description: string;
+  provider: string;
+  enabled: boolean;
+  tableName: string;
+  valueColumn: string;
+  labelColumn: string;
+  searchColumns: string[];
+  activeColumn: string;
+  orderBy: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OptionSourcePayload {
+  name: string;
+  description: string;
+  enabled: boolean;
+  tableName: string;
+  valueColumn: string;
+  labelColumn: string;
+  searchColumns: string[];
+  activeColumn: string;
+  orderBy: string[];
 }
 
 export type JsonRecord = Record<string, unknown>;

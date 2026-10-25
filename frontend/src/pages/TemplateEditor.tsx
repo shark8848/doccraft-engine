@@ -52,7 +52,7 @@ import {
   updateFieldReferences,
 } from "../layout";
 import { emptyBlock, fieldId as makeFieldId, newId } from "../templateDefaults";
-import type { BlockKind, FieldType, LayoutBlock, Stage, TemplateDetail, TemplateField, TemplateSource } from "../types";
+import type { BlockKind, FieldType, LayoutBlock, OptionSource, Stage, TemplateDetail, TemplateField, TemplateSource } from "../types";
 
 const STAGES: { value: Stage; label: string }[] = [
   { value: "draft", label: "草稿" },
@@ -114,9 +114,9 @@ function makePaletteBlock(kind: BlockKind, source: TemplateSource): { block: Lay
 }
 
 function fieldTypePatch(field: TemplateField, type: FieldType): Partial<TemplateField> {
-  if (type !== "enum") return { type, options: [] };
-  if (field.options?.length) return { type };
-  return { type, options: [{ value: "option_1", label: "选项 1" }] };
+  if (type !== "enum") return { type, options: [], optionsSource: undefined };
+  if (field.type === "enum") return { type };
+  return { type, options: [{ value: "option_1", label: "选项 1" }], optionsSource: undefined };
 }
 
 function parseEnumOptions(text: string): NonNullable<TemplateField["options"]> {
@@ -161,7 +161,8 @@ function EnumOptionsEditor({ field, onChange }: { field: TemplateField; onChange
   );
 }
 
-function FieldDefinitionFields({ field, onChange }: { field: TemplateField; onChange: (patch: Partial<TemplateField>) => void }) {
+function FieldDefinitionFields({ field, onChange, optionSources }: { field: TemplateField; onChange: (patch: Partial<TemplateField>) => void; optionSources: OptionSource[] }) {
+  const enabledSources = optionSources.filter((source) => source.enabled);
   return (
     <>
       <label className="form-label">显示名称</label>
@@ -175,8 +176,40 @@ function FieldDefinitionFields({ field, onChange }: { field: TemplateField; onCh
       <Input.TextArea rows={2} value={field.help ?? ""} onChange={(event) => onChange({ help: event.target.value })} />
       {field.type === "enum" && (
         <>
-          <label className="form-label" style={{ marginTop: 9 }}>选项（每行“值|显示名”）</label>
-          <EnumOptionsEditor field={field} onChange={onChange} />
+          <label className="form-label" style={{ marginTop: 9 }}>选项来源</label>
+          <Segmented
+            block
+            value={field.optionsSource ? "lookup" : "static"}
+            options={[
+              { value: "static", label: "固定选项" },
+              { value: "lookup", label: "系统数据源", disabled: enabledSources.length === 0 },
+            ]}
+            onChange={(value) => {
+              if (value === "lookup") {
+                onChange({ options: [], optionsSource: { sourceId: enabledSources[0]?.id ?? "" } });
+              } else {
+                onChange({ optionsSource: undefined, options: field.options?.length ? field.options : [{ value: "option_1", label: "选项 1" }] });
+              }
+            }}
+          />
+          {field.optionsSource ? (
+            <>
+              <label className="form-label" style={{ marginTop: 9 }}>数据源</label>
+              <Select
+                style={{ width: "100%" }}
+                value={field.optionsSource.sourceId || undefined}
+                placeholder="请选择数据源"
+                options={optionSources.map((source) => ({ value: source.id, label: `${source.name}${source.enabled ? "" : "（已停用）"}`, disabled: !source.enabled }))}
+                onChange={(sourceId) => onChange({ optionsSource: { sourceId } })}
+              />
+              <div className="form-hint">选项在文档编辑时实时读取；数据源在“数据源管理”中维护。</div>
+            </>
+          ) : (
+            <>
+              <label className="form-label" style={{ marginTop: 9 }}>选项（每行“值|显示名”）</label>
+              <EnumOptionsEditor field={field} onChange={onChange} />
+            </>
+          )}
         </>
       )}
       <label className="form-label" style={{ marginTop: 9 }}>必填阶段</label>
@@ -230,6 +263,7 @@ export function TemplateEditorPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [yamlText, setYamlText] = useState("");
   const [editingFieldId, setEditingFieldId] = useState<string | null>(null);
+  const [optionSources, setOptionSources] = useState<OptionSource[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = () => {
@@ -249,6 +283,9 @@ export function TemplateEditorPage() {
       .finally(() => setLoading(false));
   };
   useEffect(load, [templateId]);
+  useEffect(() => {
+    void api.optionSources().then(setOptionSources).catch(() => setOptionSources([]));
+  }, []);
   useEffect(() => {
     if (!dirty) return;
     const onUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); };
@@ -614,7 +651,7 @@ export function TemplateEditorPage() {
               {selectedField && (
                 <div className="property-group">
                   <h3>字段定义</h3>
-                  <FieldDefinitionFields field={selectedField} onChange={(patch) => updateField(selectedField.id, patch)} />
+                  <FieldDefinitionFields field={selectedField} onChange={(patch) => updateField(selectedField.id, patch)} optionSources={optionSources} />
                 </div>
               )}
 
@@ -673,7 +710,7 @@ export function TemplateEditorPage() {
       >
         {editingField && (
           <div className="form-stack">
-            <FieldDefinitionFields field={editingField} onChange={(patch) => updateField(editingField.id, patch)} />
+            <FieldDefinitionFields field={editingField} onChange={(patch) => updateField(editingField.id, patch)} optionSources={optionSources} />
           </div>
         )}
       </Drawer>

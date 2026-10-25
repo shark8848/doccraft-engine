@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     ForeignKey,
     Index,
@@ -144,6 +145,38 @@ class Asset(Base):
     error_message: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (Index("ix_assets_tenant_status", "tenant_id", "status"),)
+
+
+class RegionCity(Base):
+    __tablename__ = "biz_region_city"
+
+    city_code: Mapped[str] = mapped_column(String(12), primary_key=True)
+    city_name: Mapped[str] = mapped_column(String(80), nullable=False)
+    province_code: Mapped[str] = mapped_column(String(12), nullable=False, index=True)
+    province_name: Mapped[str] = mapped_column(String(40), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now_utc, onupdate=now_utc
+    )
+
+
+class OptionSource(Base):
+    __tablename__ = "option_sources"
+    __table_args__ = (UniqueConstraint("tenant_id", "name", name="uq_option_source_name"),)
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    provider: Mapped[str] = mapped_column(String(40), nullable=False, default="postgres_table")
+    config: Mapped[dict[str, Any]] = mapped_column(JSONType, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_by: Mapped[str] = mapped_column(String(80), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now_utc, onupdate=now_utc
+    )
 
 
 class Operation(Base):

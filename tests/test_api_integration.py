@@ -201,3 +201,122 @@ def test_template_document_cas_idempotency_and_publish() -> None:
         assert rejected.json()["code"] == "ASSET_NOT_READY"
     finally:
         client.close()
+
+
+def test_dynamic_option_source_binding_and_management() -> None:
+    os.environ.setdefault("DOCCRAFT_DATABASE_URL", "postgresql+psycopg://open-ikc-platform:1qaz2wsx3edc@127.0.0.1:5432/doccraft_test")
+    from app.config import get_settings
+    from app.db import Base, SessionLocal, engine
+    from app.main import app
+    from app.seed import seed_option_sources, seed_region_cities
+    from app.template_fixture import minimal_template
+
+    get_settings.cache_clear()
+
+    async def reset() -> None:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.drop_all)
+            await connection.run_sync(Base.metadata.create_all)
+        async with SessionLocal() as session:
+            await seed_region_cities(session)
+            await seed_option_sources(session, "default", "dev-user")
+            await session.commit()
+
+    asyncio.run(reset())
+    app.state.settings = get_settings()
+    app.state.es = FakeES()
+    app.state.storage = FakeStorage()
+    client = TestClient(app)
+    try:
+        sources = client.get("/api/v1/option-sources")
+        assert sources.status_code == 200, sources.text
+        city_source = next(item for item in sources.json()["items"] if item["name"] == "浙江省地市")
+        assert city_source["tableName"] == "biz_region_city"
+
+        options = client.get(f"/api/v1/option-sources/{city_source['id']}/options", params={"query": "杭州"})
+        assert options.status_code == 200, options.text
+        assert options.json()["items"] == [{"value": "330100", "label": "杭州市"}]
+
+        created_source = client.post(
+            "/api/v1/option-sources",
+            json={
+                "name": "地市测试副本",
+                "description": "集成测试",
+                "enabled": True,
+                "tableName": "biz_region_city",
+                "valueColumn": "city_code",
+                "labelColumn": "city_name",
+                "searchColumns": ["city_name", "city_code"],
+                "activeColumn": "enabled",
+                "orderBy": ["sort_order", "city_code"],
+            },
+        )
+        assert created_source.status_code == 201, created_source.text
+        copied_source = created_source.json()
+        updated_source = client.put(
+            f"/api/v1/option-sources/{copied_source['id']}",
+            json={
+                "name": "地市测试副本",
+                "description": "已停用",
+                "enabled": False,
+                "tableName": "biz_region_city",
+                "valueColumn": "city_code",
+                "labelColumn": "city_name",
+                "searchColumns": ["city_name", "city_code"],
+                "activeColumn": "enabled",
+                "orderBy": ["sort_order", "city_code"],
+            },
+        )
+        assert updated_source.status_code == 200, updated_source.text
+        assert updated_source.json()["enabled"] is False
+
+        source = minimal_template()
+        source["fields"].append(
+            {
+                "id": "city_code",
+                "type": "enum",
+                "label": "地市",
+                "requiredAt": ["publish"],
+                "optionsSource": {"sourceId": city_source["id"]},
+            }
+        )
+        source["layout"]["children"][0]["children"].append(
+            {"id": "slot_city", "kind": "field", "fieldId": "city_code"}
+        )
+        template = client.post("/api/v1/templates", json={"source": source})
+        assert template.status_code == 201, template.text
+        template_id = template.json()["id"]
+        assert client.post(f"/api/v1/templates/{template_id}/publish").status_code == 200
+
+        document = client.post("/api/v1/documents", json={"templateId": template_id, "title": "杭州指南"})
+        assert document.status_code == 201, document.text
+        document_id = document.json()["id"]
+        values = {
+            "title": "杭州指南",
+            "body": {"type": "doc", "content": []},
+            "city_code": "330100",
+        }
+        saved = client.put(
+            f"/api/v1/documents/{document_id}/draft",
+            headers={"If-Match": '"1"', "Idempotency-Key": "dynamic-save-1"},
+            json={"values": values},
+        )
+        assert saved.status_code == 200, saved.text
+        assert client.post(f"/api/v1/documents/{document_id}/publish").status_code == 200
+
+        invalid_document = client.post(
+            "/api/v1/documents", json={"templateId": template_id, "title": "无效地市"}
+        )
+        invalid_id = invalid_document.json()["id"]
+        invalid_values = {**values, "title": "无效地市", "city_code": "999999"}
+        saved_invalid = client.put(
+            f"/api/v1/documents/{invalid_id}/draft",
+            headers={"If-Match": '"1"', "Idempotency-Key": "dynamic-save-2"},
+            json={"values": invalid_values},
+        )
+        assert saved_invalid.status_code == 200, saved_invalid.text
+        rejected = client.post(f"/api/v1/documents/{invalid_id}/publish")
+        assert rejected.status_code == 422, rejected.text
+        assert rejected.json()["diagnostics"][0]["path"] == "city_code"
+    finally:
+        client.close()

@@ -9,7 +9,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-COMPILER_VERSION = "1.0"
+COMPILER_VERSION = "1.1"
 STAGES = ("draft", "submit", "publish")
 FIELD_TYPES = {
     "string",
@@ -44,8 +44,13 @@ class FieldOption(BaseModel):
     value: str
 
 
-class TemplateField(BaseModel):
+class FieldOptionsSource(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    sourceId: str = Field(min_length=1, max_length=80)
+
+
+class TemplateField(BaseModel):
+    model_config = ConfigDict(extra="forbid", exclude_none=True)
     id: str
     type: Literal[
         "string", "text", "enum", "array", "object", "number", "boolean", "date", "asset", "richtext"
@@ -55,6 +60,7 @@ class TemplateField(BaseModel):
     help: str = ""
     requiredAt: list[Literal["draft", "submit", "publish"]] = Field(default_factory=list)
     options: list[FieldOption] = Field(default_factory=list)
+    optionsSource: FieldOptionsSource | None = None
 
     @field_validator("id")
     @classmethod
@@ -65,10 +71,12 @@ class TemplateField(BaseModel):
 
     @model_validator(mode="after")
     def validate_options(self) -> "TemplateField":
-        if self.type == "enum" and not self.options:
+        if self.type == "enum" and self.optionsSource is not None and self.options:
+            raise ValueError("enum 字段不能同时配置 options 和 optionsSource")
+        if self.type == "enum" and self.optionsSource is None and not self.options:
             raise ValueError("enum 字段必须提供 options")
-        if self.type != "enum" and self.options:
-            raise ValueError("只有 enum 字段可以配置 options")
+        if self.type != "enum" and (self.options or self.optionsSource is not None):
+            raise ValueError("只有 enum 字段可以配置 options 或 optionsSource")
         return self
 
 
@@ -210,7 +218,7 @@ class TemplateSource(BaseModel):
         return self
 
 
-def _active_field_ids(source: TemplateSource) -> set[str]:
+def active_field_ids(source: TemplateSource) -> set[str]:
     active: set[str] = set()
 
     def walk(block: LayoutBlock) -> None:
@@ -239,6 +247,8 @@ def _json_type(field: TemplateField) -> dict[str, Any]:
             schema["x-ui"] = "textarea"
         return schema
     if field.type == "enum":
+        if field.optionsSource is not None:
+            return {"type": "string", "maxLength": 200}
         return {"type": "string", "enum": [item.value for item in field.options]}
     if field.type == "array":
         return {"type": "array", "items": {"type": "string"}, "maxItems": 200}
@@ -274,6 +284,8 @@ def _block_index(block: LayoutBlock, fields: dict[str, TemplateField]) -> dict[s
             "requiredAt": field.requiredAt,
             "options": [item.model_dump() for item in field.options],
         }
+        if field.optionsSource:
+            result["field"]["optionsSource"] = field.optionsSource.model_dump()
     if block.children:
         result["children"] = [_block_index(child, fields) for child in block.children]
     return result
@@ -289,7 +301,7 @@ def compile_template(source_dict: dict[str, Any]) -> dict[str, Any]:
         ]
         raise TemplateCompileError(diagnostics) from exc
 
-    active_ids = _active_field_ids(source)
+    active_ids = active_field_ids(source)
     active_fields = [field for field in source.fields if field.id in active_ids]
     fields = {item.id: item for item in active_fields}
     stage_schemas: dict[str, Any] = {}
@@ -349,7 +361,7 @@ def validate_content(
     source_dict: dict[str, Any], values: dict[str, Any], stage: Literal["draft", "submit", "publish"]
 ) -> list[Diagnostic]:
     source = TemplateSource.model_validate(source_dict)
-    active_ids = _active_field_ids(source)
+    active_ids = active_field_ids(source)
     fields = {item.id: item for item in source.fields if item.id in active_ids}
     declared_ids = {item.id for item in source.fields}
     diagnostics: list[Diagnostic] = []
@@ -375,6 +387,8 @@ def _matches_type(field: TemplateField, value: Any) -> bool:
     if field.type in {"string", "text"}:
         return isinstance(value, str) and len(value) <= 100_000
     if field.type == "enum":
+        if field.optionsSource is not None:
+            return isinstance(value, str) and 0 < len(value) <= 200
         return isinstance(value, str) and value in {item.value for item in field.options}
     if field.type == "array":
         return isinstance(value, list) and len(value) <= 200 and all(

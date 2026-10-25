@@ -20,7 +20,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 VERSION="$(sed -n 's/.*"version": "\([^"]*\)".*/\1/p' frontend/package.json | head -1)"
-IMAGE_TAG="${IMAGE_TAG:-doccraft-engine:${VERSION:-0.1.0}}"
+IMAGE_TAG="${IMAGE_TAG:-doccraft-engine:${VERSION:-0.2.0}}"
 CONTAINER_NAME="${CONTAINER_NAME:-doccraft-engine}"
 ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env}"
 HOST_PORT="${DOCCRAFT_HTTP_PORT:-5290}"

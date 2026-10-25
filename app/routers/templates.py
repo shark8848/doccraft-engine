@@ -12,6 +12,7 @@ from app.compiler import (
 )
 from app.db import get_session
 from app.deps import Identity, get_identity, parse_etag, require_publisher
+from app.lookups import template_source_diagnostics
 from app.models import Template, TemplateVersion, new_id
 from app.schemas import (
     TemplateCreateRequest,
@@ -23,6 +24,21 @@ from app.services import compile_or_422, get_template_version, template_summary
 from app.utils import iso_utc
 
 router = APIRouter(prefix="/templates", tags=["templates"])
+
+
+async def ensure_option_sources(
+    session: AsyncSession, tenant_id: str, source: dict
+) -> None:
+    diagnostics = await template_source_diagnostics(session, tenant_id, source)
+    if diagnostics:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "TEMPLATE_INVALID",
+                "message": "模板引用的数据源不可用",
+                "diagnostics": [item.model_dump() for item in diagnostics],
+            },
+        )
 
 
 @router.get("")
@@ -46,6 +62,7 @@ async def create_template(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     compiled = compile_or_422(payload.source)
+    await ensure_option_sources(session, identity.tenant_id, compiled["source"])
     template = Template(
         id=new_id("tpl"),
         tenant_id=identity.tenant_id,
@@ -125,6 +142,7 @@ async def save_template_draft(
             },
         )
     compiled = compile_or_422(payload.source)
+    await ensure_option_sources(session, identity.tenant_id, compiled["source"])
     template.draft_source = compiled["source"]
     template.name = compiled["source"]["metadata"]["name"]
     template.description = compiled["source"]["metadata"].get("description", "")
@@ -148,7 +166,9 @@ async def validate_template(
     template = await session.get(Template, template_id)
     if template is None or template.tenant_id != identity.tenant_id:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "模板不存在"})
-    return {"valid": True, "compiled": compile_or_422(payload.source)}
+    compiled = compile_or_422(payload.source)
+    await ensure_option_sources(session, identity.tenant_id, compiled["source"])
+    return {"valid": True, "compiled": compiled}
 
 
 @router.post("/{template_id}/publish")
@@ -162,6 +182,7 @@ async def publish_template(
     if template is None or template.tenant_id != identity.tenant_id:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "模板不存在"})
     compiled = compile_or_422(template.draft_source)
+    await ensure_option_sources(session, identity.tenant_id, compiled["source"])
     count = await session.scalar(
         select(func.count(TemplateVersion.id)).where(TemplateVersion.template_id == template_id)
     )
@@ -209,6 +230,7 @@ async def export_template_yaml(
 async def import_template_yaml(
     payload: TemplateImportRequest,
     identity: Identity = Depends(get_identity),
+    session: AsyncSession = Depends(get_session),
 ) -> dict:
     try:
         source = parse_yaml_template(payload.yaml)
@@ -221,4 +243,6 @@ async def import_template_yaml(
                 "diagnostics": [item.model_dump() for item in exc.diagnostics],
             },
         ) from exc
-    return {"source": source, "compiled": compile_or_422(source)}
+    compiled = compile_or_422(source)
+    await ensure_option_sources(session, identity.tenant_id, compiled["source"])
+    return {"source": source, "compiled": compiled}

@@ -17,7 +17,7 @@ from app.template_fixture import minimal_template
 
 def test_compile_minimal_template_has_stage_schemas_and_hash() -> None:
     compiled = compile_template(minimal_template())
-    assert compiled["compilerVersion"] == "1.0"
+    assert compiled["compilerVersion"] == "1.1"
     assert len(compiled["templateHash"]) == 64
     assert compiled["schemas"]["publish"]["required"] == ["title", "body"]
     assert compiled["indexPlan"]["titleField"] == "title"
@@ -73,6 +73,51 @@ def test_unused_fields_are_not_compiled_or_validated() -> None:
         {"title": "标题", "body": {"type": "doc", "content": []}, "old_field": "旧值"},
         "publish",
     ) == []
+
+
+def test_dynamic_enum_uses_lookup_source_without_static_values() -> None:
+    source = minimal_template()
+    source["fields"].append(
+        {
+            "id": "city_code",
+            "type": "enum",
+            "label": "地市",
+            "requiredAt": ["publish"],
+            "optionsSource": {"sourceId": "src_zhejiang_cities"},
+        }
+    )
+    source["layout"]["children"][0]["children"].append(
+        {"id": "slot_city", "kind": "field", "fieldId": "city_code"}
+    )
+    compiled = compile_template(source)
+    schema = compiled["schemas"]["publish"]["properties"]["city_code"]
+    assert "enum" not in schema
+    assert schema["type"] == "string"
+    assert validate_content(
+        source,
+        {
+            "title": "杭州指南",
+            "body": {"type": "doc", "content": []},
+            "city_code": "330100",
+        },
+        "publish",
+    ) == []
+
+
+def test_enum_cannot_mix_static_options_and_lookup_source() -> None:
+    source = minimal_template()
+    source["fields"].append(
+        {
+            "id": "city_code",
+            "type": "enum",
+            "label": "地市",
+            "options": [{"value": "330100", "label": "杭州市"}],
+            "optionsSource": {"sourceId": "src_zhejiang_cities"},
+        }
+    )
+    with pytest.raises(TemplateCompileError) as exc:
+        compile_template(source)
+    assert any("不能同时配置" in item.message for item in exc.value.diagnostics)
 
 
 def test_yaml_round_trip_and_merge_key_rejection() -> None:

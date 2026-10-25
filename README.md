@@ -4,7 +4,7 @@
 
 ## 已实现能力
 
-- 模板：创建、列表、详情、草稿 CAS 保存、服务端校验、不可变版本发布、YAML 导入/导出。
+- 模板：创建、列表、详情、草稿 CAS 保存、服务端校验、不可变版本发布、YAML 导入/导出；单选字段可绑定 PostgreSQL 业务表数据源并动态加载选项。
 - 可视化模板设计器：组件面板、结构化拖拽、同一容器内排序、上移/下移、字段属性编辑、删除、撤销/重做、表单预览、发布。
 - 文档：按已发布模板动态渲染表单；富文本支持标题、列表、引用、链接、图片和表格（含增行/增列/删表）；草稿保存使用 `If-Match` + `Idempotency-Key`，发布时重新校验内容与媒体状态。
 - 阅读与检索：发布正文与草稿正文分离；Elasticsearch 保存不可变 revision，Worker 通过 Outbox 生成发布投影，支持中文检索。
@@ -22,7 +22,7 @@
 - 二进制：PyUploadX 服务持有对象；DocCraft 不引入 boto3/MinIO 客户端，不向浏览器暴露 PyUploadX API Key。
 - Worker：轮询资产扫描任务与 Outbox；图片使用 Pillow 校验后标记 `READY`，异常标记 `QUARANTINED`。
 
-PostgreSQL、Elasticsearch 和 PyUploadX 均为项目外部的本地服务，本仓库只负责连接、初始化和业务调用。
+PostgreSQL、Elasticsearch 和 PyUploadX 均为项目外部的本地服务，本仓库只负责连接、初始化和业务调用。`biz_region_city` 是首个业务数据源示例表，默认内置浙江省 11 个地市代码和名称；`option_sources` 保存数据源到业务表字段的映射。
 
 ## 本地运行
 
@@ -43,7 +43,7 @@ PYTHONPATH=/path/to/PyUploadX/sdk:$PYTHONPATH python3 -m uvicorn app.main:app --
 PYTHONPATH=/path/to/PyUploadX/sdk:$PYTHONPATH python3 -m app.worker
 ```
 
-如使用已安装的 `pyuploadx` 包，可去掉 `PYTHONPATH`。默认 `DOCCRAFT_AUTO_CREATE_SCHEMA=true` 会按 ORM 元数据创建首期表；`migrations/001_initial.sql` 提供等价 DDL 供外部迁移流程使用。API 文档位于 `http://127.0.0.1:8100/docs`。
+如使用已安装的 `pyuploadx` 包，可去掉 `PYTHONPATH`。默认 `DOCCRAFT_AUTO_CREATE_SCHEMA=true` 会按 ORM 元数据创建首期表；`migrations/001_initial.sql` 和 `migrations/002_option_sources.sql` 提供等价 DDL 与浙江地市种子供外部迁移流程使用。API 文档位于 `http://127.0.0.1:8100/docs`。
 
 前端开发：
 
@@ -59,7 +59,7 @@ Vite 开发地址为 `http://127.0.0.1:5174`。生产构建会由 API 服务直�
 
 ```bash
 bash scripts/build_docker.sh
-docker load -i docker/images/doccraft-engine_0.1.0.tar.gz
+docker load -i docker/images/doccraft-engine_0.2.0.tar.gz
 cp .env.example .env
 bash scripts/start_docker.sh
 curl -fsS http://127.0.0.1:5290/healthz

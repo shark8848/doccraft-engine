@@ -12,6 +12,7 @@ from app.compiler import validate_content
 from app.db import get_session
 from app.deps import Identity, get_identity, parse_etag, require_publisher
 from app.es import SearchUnavailable
+from app.lookups import content_lookup_diagnostics
 from app.models import (
     Asset,
     Document,
@@ -323,6 +324,11 @@ async def publish_document(
             detail={"code": "BODY_MISSING", "message": "草稿正文在 ES 中不存在"},
         )
     diagnostics = validate_content(version.source, revision_doc.get("values", {}), "publish")
+    diagnostics.extend(
+        await content_lookup_diagnostics(
+            session, identity.tenant_id, version.source, revision_doc.get("values", {})
+        )
+    )
     if diagnostics:
         raise HTTPException(
             status_code=422,

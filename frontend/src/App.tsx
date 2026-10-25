@@ -6,6 +6,7 @@ import {
   BgColorsOutlined,
   BookOutlined,
   CloudUploadOutlined,
+  DatabaseOutlined,
   FileTextOutlined,
   LayoutOutlined,
   MenuFoldOutlined,
@@ -19,6 +20,7 @@ import { HashRouter, Navigate, Route, Routes, useLocation, useNavigate } from "r
 import { api } from "./api";
 import { AssetsPage } from "./pages/Assets";
 import { DashboardPage } from "./pages/Dashboard";
+import { DataSourcesPage } from "./pages/DataSources";
 import { DocumentEditorPage } from "./pages/DocumentEditor";
 import { DocumentsPage } from "./pages/Documents";
 import { SearchPage } from "./pages/Search";
@@ -44,7 +46,10 @@ const NAV_GROUPS = [
   },
   {
     label: "资源",
-    items: [{ path: "/assets", label: "媒体库", icon: <CloudUploadOutlined /> }],
+    items: [
+      { path: "/assets", label: "媒体库", icon: <CloudUploadOutlined /> },
+      { path: "/data-sources", label: "数据源", icon: <DatabaseOutlined /> },
+    ],
   },
 ];
 
@@ -67,6 +72,7 @@ function Shell() {
     if (location.pathname.startsWith("/templates")) return "/templates";
     if (location.pathname.startsWith("/documents")) return "/documents";
     if (location.pathname.startsWith("/assets")) return "/assets";
+    if (location.pathname.startsWith("/data-sources")) return "/data-sources";
     if (location.pathname.startsWith("/search")) return "/search";
     return "/";
   }, [location.pathname]);
@@ -150,6 +156,7 @@ function Shell() {
           <Route path="/documents/:documentId" element={<DocumentEditorPage />} />
           <Route path="/search" element={<SearchPage />} />
           <Route path="/assets" element={<AssetsPage />} />
+          <Route path="/data-sources" element={<DataSourcesPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

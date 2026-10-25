@@ -11,6 +11,7 @@ import {
   Modal,
   Select,
   Space,
+  Spin,
   Switch,
   Tag,
   Tooltip,
@@ -32,7 +33,7 @@ import { ApiError, api } from "../api";
 import { AssetImage, InlineError, StatusPill, formatDate } from "../components/Common";
 import { RichTextEditor } from "../components/RichTextEditor";
 import { findBlock } from "../layout";
-import type { Asset, DocumentSummary, FieldType, JsonRecord, LayoutBlock, TemplateField } from "../types";
+import type { Asset, DocumentSummary, FieldType, JsonRecord, LayoutBlock, OptionItem, TemplateField, TemplateSource } from "../types";
 
 function defaultForType(type: FieldType): unknown {
   if (type === "boolean") return false;
@@ -40,6 +41,90 @@ function defaultForType(type: FieldType): unknown {
   if (type === "richtext") return { type: "doc", content: [] };
   if (type === "object") return {};
   return "";
+}
+
+function DynamicEnumSelect({ field, value, onChange }: { field: TemplateField; value: unknown; onChange: (value: unknown) => void }) {
+  const sourceId = field.optionsSource?.sourceId ?? "";
+  const selectedValue = typeof value === "string" ? value : "";
+  const [items, setItems] = useState<OptionItem[]>([]);
+  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setItems([]);
+    setQuery("");
+    setError("");
+  }, [sourceId]);
+
+  useEffect(() => {
+    if (!sourceId) return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      setLoading(true);
+      setError("");
+      api.optionItems(sourceId, query, 50)
+        .then((next) => { if (active) setItems(next); })
+        .catch((reason: Error) => { if (active) setError(reason.message); })
+        .finally(() => { if (active) setLoading(false); });
+    }, 250);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [sourceId, query]);
+
+  useEffect(() => {
+    if (!sourceId || !selectedValue || items.some((item) => item.value === selectedValue)) return;
+    let active = true;
+    void api.resolveOptionItems(sourceId, [selectedValue])
+      .then((result) => {
+        const selected = result.items[0];
+        if (active && selected) setItems((current) => current.some((item) => item.value === selected.value) ? current : [...current, selected]);
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [sourceId, selectedValue, items]);
+
+  return (
+    <>
+      <Select
+        showSearch
+        allowClear
+        filterOption={false}
+        style={{ width: "100%" }}
+        value={selectedValue || undefined}
+        placeholder={field.placeholder || "请选择"}
+        loading={loading}
+        status={error ? "error" : undefined}
+        options={items}
+        notFoundContent={loading ? <Spin size="small" /> : error ? "数据源加载失败" : "无匹配选项"}
+        onSearch={setQuery}
+        onChange={(next) => onChange(next ?? "")}
+      />
+      {error && <div className="form-field-help" style={{ color: "var(--err)" }}>{error}</div>}
+    </>
+  );
+}
+
+async function resolveLookupLabels(source: TemplateSource, values: JsonRecord): Promise<Record<string, string>> {
+  const groups = new Map<string, TemplateField[]>();
+  for (const field of source.fields) {
+    const sourceId = field.optionsSource?.sourceId;
+    if (!sourceId || typeof values[field.id] !== "string" || !values[field.id]) continue;
+    groups.set(sourceId, [...(groups.get(sourceId) ?? []), field]);
+  }
+  const labels: Record<string, string> = {};
+  for (const [sourceId, fields] of groups) {
+    try {
+      const result = await api.resolveOptionItems(sourceId, fields.map((field) => String(values[field.id])));
+      for (const field of fields) {
+        const value = String(values[field.id]);
+        const item = result.items.find((candidate) => candidate.value === value);
+        if (item) labels[field.id] = item.label;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return labels;
 }
 
 export function DocumentEditorPage() {
@@ -58,6 +143,7 @@ export function DocumentEditorPage() {
   const [diagnostics, setDiagnostics] = useState<{ path: string; message: string }[] | null>(null);
   const [readOpen, setReadOpen] = useState(false);
   const [published, setPublished] = useState<DocumentSummary | null>(null);
+  const [publishedLabels, setPublishedLabels] = useState<Record<string, string>>({});
   const [activeSection, setActiveSection] = useState("");
 
   const load = () => {
@@ -144,6 +230,7 @@ export function DocumentEditorPage() {
   async function openReading() {
     try {
       const response = await api.publishedDocument(documentId);
+      setPublishedLabels(response.data.templateSource ? await resolveLookupLabels(response.data.templateSource, response.data.content ?? {}) : {});
       setPublished(response.data);
       setReadOpen(true);
     } catch (reason) {
@@ -214,7 +301,7 @@ export function DocumentEditorPage() {
       </Modal>
 
       <Drawer title="已发布阅读视图" width={720} open={readOpen} onClose={() => setReadOpen(false)}>
-        {published && published.templateSource && <ReadingView document={published} />}
+        {published && published.templateSource && <ReadingView document={published} labels={publishedLabels} />}
       </Drawer>
     </div>
   );
@@ -263,6 +350,7 @@ function FieldShell({ field, children }: { field: TemplateField; children: React
 function FieldControl({ field, value, onChange }: { field: TemplateField; value: unknown; onChange: (value: unknown) => void }) {
   if (field.type === "string") return <Input value={String(value ?? "")} placeholder={field.placeholder} onChange={(event) => onChange(event.target.value)} />;
   if (field.type === "text") return <Input.TextArea rows={3} value={String(value ?? "")} placeholder={field.placeholder} onChange={(event) => onChange(event.target.value)} />;
+  if (field.type === "enum" && field.optionsSource) return <DynamicEnumSelect field={field} value={value} onChange={onChange} />;
   if (field.type === "enum") return <Select style={{ width: "100%" }} value={value ? String(value) : undefined} placeholder="请选择" options={(field.options ?? []).map((option) => ({ value: option.value, label: option.label }))} onChange={onChange} />;
   if (field.type === "array") return <Select mode="tags" style={{ width: "100%" }} value={Array.isArray(value) ? value as string[] : []} placeholder="输入后回车添加" onChange={onChange} />;
   if (field.type === "number") return <InputNumber style={{ width: "100%" }} value={typeof value === "number" ? value : undefined} onChange={onChange} />;
@@ -337,7 +425,7 @@ function AssetPicker({ value, onChange, assets, onAssetCreated }: { value: strin
   );
 }
 
-function ReadingView({ document }: { document: DocumentSummary }) {
+function ReadingView({ document, labels }: { document: DocumentSummary; labels: Record<string, string> }) {
   const source = document.templateSource;
   if (!source) return null;
   const values = document.content ?? {};
@@ -345,23 +433,24 @@ function ReadingView({ document }: { document: DocumentSummary }) {
     <article className="document-paper" style={{ border: 0, boxShadow: "none", padding: 0 }}>
       <h1>{String(values[source.indexing.titleField] || document.title)}</h1>
       <div className="doc-meta">已发布 · 第 {document.publicationGeneration} 次发布</div>
-      <ReadBlock block={source.layout} fields={source.fields} values={values} />
+      <ReadBlock block={source.layout} fields={source.fields} values={values} labels={labels} />
     </article>
   );
 }
 
-function ReadBlock({ block, fields, values }: { block: LayoutBlock; fields: TemplateField[]; values: JsonRecord }) {
-  if (block.kind === "section") return <section><div className="section-divider">{block.title}</div>{block.children.map((child) => <ReadBlock key={child.id} block={child} fields={fields} values={values} />)}</section>;
-  if (block.kind === "columns") return <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16 }}>{block.children.map((child) => <ReadBlock key={child.id} block={child} fields={fields} values={values} />)}</div>;
+function ReadBlock({ block, fields, values, labels }: { block: LayoutBlock; fields: TemplateField[]; values: JsonRecord; labels: Record<string, string> }) {
+  if (block.kind === "section") return <section><div className="section-divider">{block.title}</div>{block.children.map((child) => <ReadBlock key={child.id} block={child} fields={fields} values={values} labels={labels} />)}</section>;
+  if (block.kind === "columns") return <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16 }}>{block.children.map((child) => <ReadBlock key={child.id} block={child} fields={fields} values={values} labels={labels} />)}</div>;
   if (block.kind === "staticText") return <p className="muted pre-wrap">{block.text}</p>;
-  if (block.kind === "stack") return <>{block.children.map((child) => <ReadBlock key={child.id} block={child} fields={fields} values={values} />)}</>;
+  if (block.kind === "stack") return <>{block.children.map((child) => <ReadBlock key={child.id} block={child} fields={fields} values={values} labels={labels} />)}</>;
   const field = fields.find((item) => item.id === block.fieldId);
   if (!field) return null;
   const value = values[field.id];
   if (isEmpty(value)) return null;
   if (block.kind === "richText" && typeof value === "object") return <RichRead value={value as JsonRecord} />;
   if (block.kind === "asset" && typeof value === "string") return <AssetImage assetId={value} alt={field.label} />;
-  return <div className="form-field"><div className="form-field-label">{field.label}</div><div className="pre-wrap">{Array.isArray(value) ? value.join("、") : typeof value === "object" ? JSON.stringify(value, null, 2) : String(value)}</div></div>;
+  const display = labels[field.id] ?? (Array.isArray(value) ? value.join("、") : typeof value === "object" ? JSON.stringify(value, null, 2) : String(value));
+  return <div className="form-field"><div className="form-field-label">{field.label}</div><div className="pre-wrap">{display}</div></div>;
 }
 
 function RichRead({ value }: { value: JsonRecord }) {
