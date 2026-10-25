@@ -119,7 +119,7 @@ export function HighlightText({ value }: { value: string }) {
   );
 }
 
-export function AssetImage({ assetId, alt, className }: { assetId: string; alt: string; className?: string }) {
+export function AssetImage({ assetId, alt, className, inline = false }: { assetId: string; alt: string; className?: string; inline?: boolean }) {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -139,9 +139,9 @@ export function AssetImage({ assetId, alt, className }: { assetId: string; alt: 
     };
   }, [assetId]);
 
-  if (failed) return <div className="asset-slot">资源尚未就绪</div>;
-  if (!url) return <div className="asset-slot"><Spin size="small" /> <span style={{ marginTop: 8 }}>加载资源…</span></div>;
-  return <img className={className ?? "asset-preview"} src={url} alt={alt} />;
+  if (failed) return inline ? <span className="rich-image-status">资源尚未就绪</span> : <div className="asset-slot">资源尚未就绪</div>;
+  if (!url) return inline ? <span className="rich-image-status"><Spin size="small" /> 加载图片…</span> : <div className="asset-slot"><Spin size="small" /> <span style={{ marginTop: 8 }}>加载资源…</span></div>;
+  return <img className={className ?? (inline ? "rich-inline-image" : "asset-preview")} src={url} alt={alt} />;
 }
 
 export function Panel({ title, extra, children }: { title: string; extra?: ReactNode; children: ReactNode }) {

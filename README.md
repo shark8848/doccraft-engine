@@ -13,6 +13,10 @@
 
 模板编辑器的创建、字段、拖拽、校验、预览、发布和 YAML 操作见 [模板编辑器使用指南](docs/template-editor-guide.md)。
 
+整个引擎的产品边界、架构、数据字典、核心链路、完整 API、E2E、一致性、安全、部署与培训路径见 [全引擎技术设计](docs/engine-design.md)。
+
+动态选项数据源的架构、数据结构、API、端到端交互和扩展说明见 [动态选项数据源技术实现](docs/dynamic-option-source-implementation.md)。
+
 ## 技术架构
 
 - 前端：React、TypeScript、Vite、Ant Design；hash 路由；四套 CSS 主题；原生 HTML5 拖拽；`contentEditable` 富文本编辑并序列化为 JSON AST。

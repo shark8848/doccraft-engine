@@ -454,19 +454,42 @@ function ReadBlock({ block, fields, values, labels }: { block: LayoutBlock; fiel
 }
 
 function RichRead({ value }: { value: JsonRecord }) {
+  const safeHref = (href: unknown): string | null => {
+    const candidate = typeof href === "string" ? href.trim() : "";
+    return /^(https?:|mailto:|tel:|\/(?!\/)|\.{1,2}\/|#)/i.test(candidate) ? candidate : null;
+  };
+
   const render = (node: JsonRecord): React.ReactNode => {
     const type = String(node.type ?? "");
+    const attrs = (node.attrs ?? {}) as JsonRecord;
     const children = Array.isArray(node.content) ? <>{((node.content as JsonRecord[]).map((child, index) => <Fragment key={index}>{render(child)}</Fragment>))}</> : null;
-    if (type === "text") return String(node.text ?? "");
+    if (type === "text") {
+      let content: React.ReactNode = String(node.text ?? "");
+      const marks = Array.isArray(node.marks) ? node.marks as JsonRecord[] : [];
+      for (const mark of marks) {
+        if (mark.type === "bold") content = <strong>{content}</strong>;
+        else if (mark.type === "italic") content = <em>{content}</em>;
+        else if (mark.type === "code") content = <code>{content}</code>;
+        else if (mark.type === "link") {
+          const href = safeHref((mark.attrs as JsonRecord | undefined)?.href);
+          if (href) content = <a href={href} target={/^https?:/i.test(href) ? "_blank" : undefined} rel={/^https?:/i.test(href) ? "noopener noreferrer" : undefined}>{content}</a>;
+        }
+      }
+      return content;
+    }
+    if (type === "image") {
+      const assetId = String(attrs.assetId ?? "");
+      return assetId ? <AssetImage assetId={assetId} alt={String(attrs.alt ?? "")} inline /> : null;
+    }
     if (type === "paragraph") return <p>{children}</p>;
-    if (type === "heading") return <h2>{children}</h2>;
+    if (type === "heading") return Number(attrs.level) === 3 ? <h3>{children}</h3> : <h2>{children}</h2>;
     if (type === "bulletList") return <ul>{children}</ul>;
     if (type === "orderedList") return <ol>{children}</ol>;
     if (type === "listItem") return <li>{children}</li>;
     if (type === "blockquote") return <blockquote>{children}</blockquote>;
     if (type === "table") return <table><tbody>{children}</tbody></table>;
     if (type === "tableRow") return <tr>{children}</tr>;
-    if (type === "tableCell") return (node.attrs as JsonRecord | undefined)?.header ? <th>{children}</th> : <td>{children}</td>;
+    if (type === "tableCell") return attrs.header ? <th>{children}</th> : <td>{children}</td>;
     if (type === "hardBreak") return <br />;
     return <>{children}</>;
   };

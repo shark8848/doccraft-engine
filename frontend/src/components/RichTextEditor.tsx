@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { App, Button, InputNumber, Modal, Tooltip } from "antd";
+import { App, Button, Input, InputNumber, Modal, Tooltip } from "antd";
 import {
   BoldOutlined,
   CodeOutlined,
@@ -157,11 +157,15 @@ export function RichTextEditor({ value, onChange, placeholder = "开始输入正
   const ref = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLInputElement>(null);
   const tableRangeRef = useRef<Range | null>(null);
+  const linkRangeRef = useRef<Range | null>(null);
   const insertedTableIndexRef = useRef<number | null>(null);
   const [uploading, setUploading] = useState(false);
   const [tableDialogOpen, setTableDialogOpen] = useState(false);
   const [tableRows, setTableRows] = useState(3);
   const [tableColumns, setTableColumns] = useState(3);
+  const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+  const [linkText, setLinkText] = useState("");
+  const [linkHref, setLinkHref] = useState("");
   const objectUrls = useRef<string[]>([]);
 
   useEffect(() => {
@@ -195,9 +199,61 @@ export function RichTextEditor({ value, onChange, placeholder = "开始输入正
     emit();
   }
 
-  function addLink() {
-    const href = window.prompt("输入链接地址", "https://");
-    if (href) command("createLink", href);
+  function rangeInsideEditor(range: Range | null): Range | null {
+    return range && ref.current?.contains(range.commonAncestorContainer) ? range : null;
+  }
+
+  function openLinkDialog() {
+    const selection = window.getSelection();
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    const savedRange = rangeInsideEditor(range);
+    linkRangeRef.current = savedRange ? savedRange.cloneRange() : null;
+    setLinkText(savedRange?.toString() ?? "");
+    setLinkHref("");
+    setLinkDialogOpen(true);
+  }
+
+  function normalizeHref(value: string): string | null {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    if (/^(https?:|mailto:|tel:)/i.test(trimmed)) return trimmed;
+    if ((trimmed.startsWith("/") && !trimmed.startsWith("//")) || trimmed.startsWith("#")) return trimmed;
+    if (/^[^\s]+\.[^\s]+$/.test(trimmed)) return `https://${trimmed}`;
+    return null;
+  }
+
+  function insertLink() {
+    const href = normalizeHref(linkHref);
+    if (!href) {
+      message.warning("请输入 http(s)、mailto、tel、站内路径或有效域名");
+      return;
+    }
+    const element = ref.current;
+    if (!element) return;
+    const anchor = document.createElement("a");
+    anchor.setAttribute("href", href);
+    anchor.textContent = linkText.trim() || href;
+
+    const selection = window.getSelection();
+    const range = rangeInsideEditor(linkRangeRef.current);
+    let target = range ?? document.createRange();
+    if (!range) {
+      target.selectNodeContents(element);
+      target.collapse(false);
+    } else {
+      selection?.removeAllRanges();
+      selection?.addRange(target);
+    }
+    target.deleteContents();
+    target.insertNode(anchor);
+    target.setStartAfter(anchor);
+    target.collapse(true);
+    selection?.removeAllRanges();
+    selection?.addRange(target);
+    element.focus();
+    setLinkDialogOpen(false);
+    emit();
+    message.success("链接已插入");
   }
 
   function currentCell(): HTMLTableCellElement | null {
@@ -318,7 +374,7 @@ export function RichTextEditor({ value, onChange, placeholder = "开始输入正
         <Tooltip title="项目符号"><Button type="text" size="small" icon={<UnorderedListOutlined />} onClick={() => command("insertUnorderedList")} /></Tooltip>
         <Tooltip title="编号列表"><Button type="text" size="small" icon={<OrderedListOutlined />} onClick={() => command("insertOrderedList")} /></Tooltip>
         <Tooltip title="引用"><Button type="text" size="small" icon={<CodeOutlined />} onClick={() => command("formatBlock", "<blockquote>")} /></Tooltip>
-        <Tooltip title="链接"><Button type="text" size="small" icon={<LinkOutlined />} onClick={addLink} /></Tooltip>
+        <Tooltip title="插入链接"><Button type="text" size="small" icon={<LinkOutlined />} aria-label="插入链接" onClick={openLinkDialog} /></Tooltip>
         <Tooltip title="插入图片"><Button type="text" size="small" icon={<PictureOutlined />} loading={uploading} onClick={() => imageRef.current?.click()} /></Tooltip>
         <Tooltip title="插入表格"><Button type="text" size="small" icon={<TableOutlined />} aria-label="插入表格" onClick={openTableDialog} /></Tooltip>
         <Tooltip title="增加表格行"><Button type="text" size="small" icon={<InsertRowBelowOutlined />} aria-label="增加表格行" onMouseDown={(event) => event.preventDefault()} onClick={addTableRow} /></Tooltip>
@@ -336,6 +392,25 @@ export function RichTextEditor({ value, onChange, placeholder = "开始输入正
         data-placeholder={placeholder}
         onInput={emit}
       />
+      <Modal
+        title="插入链接"
+        open={linkDialogOpen}
+        centered
+        width={420}
+        okText="插入"
+        cancelText="取消"
+        onOk={insertLink}
+        onCancel={() => setLinkDialogOpen(false)}
+        afterClose={() => ref.current?.focus()}
+      >
+        <div className="form-stack">
+          <label className="form-label">显示文字</label>
+          <Input aria-label="链接文字" value={linkText} placeholder="输入链接显示文字" onChange={(event) => setLinkText(event.target.value)} />
+          <label className="form-label" style={{ marginTop: 9 }}>链接地址</label>
+          <Input aria-label="链接地址" value={linkHref} placeholder="https://example.com 或 /relative/path" onChange={(event) => setLinkHref(event.target.value)} onPressEnter={insertLink} />
+          <div className="form-hint">支持 http(s)、mailto、tel、站内相对路径和完整域名。</div>
+        </div>
+      </Modal>
       <Modal
         title="插入表格"
         open={tableDialogOpen}
