@@ -11,6 +11,8 @@
 - 媒体：后端仅通过 `pyuploadx.Client` 上传、下载、删除和检查服务；租户隔离、大小/MIME 校验、SHA-256 记录、图片异步校验。
 - 前端：React 19 + TypeScript + Ant Design；沿用 `ikc-demo` 的侧栏/主题骨架和 `WeKnora` 的页头、工具条、卡片、空状态与消息反馈。
 
+模板编辑器的创建、字段、拖拽、校验、预览、发布和 YAML 操作见 [模板编辑器使用指南](docs/template-editor-guide.md)。
+
 ## 技术架构
 
 - 前端：React、TypeScript、Vite、Ant Design；hash 路由；四套 CSS 主题；原生 HTML5 拖拽；`contentEditable` 富文本编辑并序列化为 JSON AST。

@@ -19,6 +19,13 @@ test("核心导航、模板设计器与主题切换", async ({ page }) => {
   await expect(page.locator(".ant-drawer")).toContainText("编辑字段");
   await page.locator(".ant-drawer").getByRole("textbox").first().fill("文档标题");
   await expect(page.locator(".ant-drawer-title")).toContainText("文档标题");
+  await page.locator(".ant-drawer .ant-select").click();
+  await page.locator(".ant-select-item-option").filter({ hasText: "单选" }).click();
+  const enumOptions = page.locator(".ant-drawer").getByRole("textbox", { name: "选项（每行“值|显示名”）" });
+  await enumOptions.fill("draft|草稿");
+  await enumOptions.press("Enter");
+  await enumOptions.type("published|已发布");
+  await expect(enumOptions).toHaveValue("draft|草稿\npublished|已发布");
   await page.locator(".ant-drawer-footer").getByRole("button", { name: /完\s*成/ }).click();
   await expect(page.locator(".field-row").first()).toContainText("文档标题");
 

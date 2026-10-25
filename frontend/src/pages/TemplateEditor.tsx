@@ -119,6 +119,48 @@ function fieldTypePatch(field: TemplateField, type: FieldType): Partial<Template
   return { type, options: [{ value: "option_1", label: "选项 1" }] };
 }
 
+function parseEnumOptions(text: string): NonNullable<TemplateField["options"]> {
+  return text.split("\n").map((line) => line.trim()).filter(Boolean).map((line) => {
+    const separator = line.indexOf("|");
+    const value = (separator >= 0 ? line.slice(0, separator) : line).trim();
+    const label = (separator >= 0 ? line.slice(separator + 1) : line).trim();
+    return { value, label: label || value };
+  }).filter((option) => option.value);
+}
+
+function serializeEnumOptions(options: NonNullable<TemplateField["options"]>): string {
+  return options.map((option) => `${option.value}|${option.label}`).join("\n");
+}
+
+function EnumOptionsEditor({ field, onChange }: { field: TemplateField; onChange: (patch: Partial<TemplateField>) => void }) {
+  const serialized = serializeEnumOptions(field.options ?? []);
+  const [text, setText] = useState(serialized);
+  const editing = useRef(false);
+
+  useEffect(() => {
+    if (!editing.current) setText(serialized);
+  }, [serialized]);
+
+  return (
+    <Input.TextArea
+      rows={4}
+      aria-label="选项（每行“值|显示名”）"
+      value={text}
+      onFocus={() => { editing.current = true; }}
+      onChange={(event) => {
+        setText(event.target.value);
+        onChange({ options: parseEnumOptions(event.target.value) });
+      }}
+      onBlur={() => {
+        editing.current = false;
+        const options = parseEnumOptions(text);
+        setText(serializeEnumOptions(options));
+        onChange({ options });
+      }}
+    />
+  );
+}
+
 function FieldDefinitionFields({ field, onChange }: { field: TemplateField; onChange: (patch: Partial<TemplateField>) => void }) {
   return (
     <>
@@ -134,16 +176,7 @@ function FieldDefinitionFields({ field, onChange }: { field: TemplateField; onCh
       {field.type === "enum" && (
         <>
           <label className="form-label" style={{ marginTop: 9 }}>选项（每行“值|显示名”）</label>
-          <Input.TextArea
-            rows={4}
-            value={(field.options ?? []).map((option) => `${option.value}|${option.label}`).join("\n")}
-            onChange={(event) => onChange({
-              options: event.target.value.split("\n").filter(Boolean).map((line) => {
-                const [value, label] = line.split("|");
-                return { value: value.trim(), label: (label ?? value).trim() };
-              }),
-            })}
-          />
+          <EnumOptionsEditor field={field} onChange={onChange} />
         </>
       )}
       <label className="form-label" style={{ marginTop: 9 }}>必填阶段</label>
